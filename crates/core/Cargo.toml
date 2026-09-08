@@ -1,0 +1,7 @@
+[package]
+name = "hamsters-core"
+version = "0.1.0"
+edition = "2021"
+description = "Pure game logic for the hamster launch game. No platform code."
+
+[dependencies]

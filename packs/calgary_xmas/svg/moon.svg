@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+<defs><radialGradient id="moon" cx="0.4" cy="0.35" r="0.75"><stop offset="0" stop-color="#fffdf2" stop-opacity="1"/><stop offset="0.7" stop-color="#f3edd2" stop-opacity="1"/><stop offset="1" stop-color="#d9d2b0" stop-opacity="1"/></radialGradient><radialGradient id="mglow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#fff6c8" stop-opacity="0.55"/><stop offset="0.45" stop-color="#fff6c8" stop-opacity="0.18"/><stop offset="1" stop-color="#fff6c8" stop-opacity="0"/></radialGradient></defs>
+
+<circle cx="128" cy="128" r="126" fill="url(#mglow)"/>
+<circle cx="128" cy="128" r="70" fill="url(#moon)"/>
+<circle cx="128" cy="128" r="70" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.5"/>
+<g opacity="0.35" fill="#b9b39a"><circle cx="104" cy="112" r="14"/><circle cx="146" cy="140" r="10"/><circle cx="120" cy="156" r="7"/><circle cx="150" cy="104" r="5"/></g>
+
+</svg>

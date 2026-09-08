@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Santa's Flight School · Gallery</title>
+<style>
+  :root { --bg:#1b1f33; --card:#262b45; --ink:#f3f1ea; --dim:#9aa0bd; --gold:#f2c14e; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding:20px 28px 8px; display:flex; align-items:baseline; gap:18px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:22px; }
+  header a { color:var(--gold); }
+  .controls { display:flex; gap:14px; align-items:center; color:var(--dim); font-size:13px; }
+  .controls input[type=range] { width:140px; }
+  section { padding:8px 28px 18px; }
+  section h2 { margin:14px 0 10px; font-size:16px; color:var(--gold); letter-spacing:.04em; text-transform:uppercase; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(var(--cell,150px), 1fr)); gap:12px; }
+  .card { background:var(--card); border-radius:12px; padding:10px; display:flex; flex-direction:column; align-items:center; gap:8px; min-height:120px; }
+  .card .img { width:100%; height:var(--cellh,120px); display:flex; align-items:center; justify-content:center;
+    background: repeating-conic-gradient(#2e3352 0 25%, #232842 0 50%) 0 0 / 24px 24px; border-radius:8px; overflow:hidden; }
+  .card img { max-width:100%; max-height:100%; image-rendering:auto; }
+  .card.pixel img { image-rendering:pixelated; }
+  .card .name { font-size:12px; color:var(--dim); text-align:center; word-break:break-all; }
+  .styles .card { padding:14px; }
+  .styles .img { height:300px; }
+  .styles .name { font-size:15px; color:var(--ink); }
+  .styles .num { display:inline-block; background:var(--gold); color:#1b1f33; font-weight:700; border-radius:999px; padding:1px 10px; margin-right:6px; }
+  .styles .desc { font-size:12.5px; color:var(--dim); text-align:center; }
+  .wide .img { height:110px; }
+  .wide img { max-width:none; height:100%; }
+  .bg-dark { --chk1:#2e3352; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Santa's Flight School · Gallery</h1>
+  <a href="../">← back to the game</a>
+  <div class="controls">
+    <label>cell size <input id="size" type="range" min="90" max="320" value="150"></label>
+    <label><input id="dark" type="checkbox"> dark background</label>
+    <span id="count"></span>
+  </div>
+</header>
+<div id="picks"></div>
+<div id="groups"></div>
+<script>
+const STYLE_META = {
+  "cand_dog_1.png": ["Buddy", "Cream, long dark ears flung out like wings. Closest to the reference."],
+  "cand_dog_2.png": ["Biscuit the corgi", "Orange, upright ears, white blaze, green collar."],
+  "cand_dog_3.png": ["Nanook the husky", "Grey with a white mask, pointy ears, blue eyes."],
+  "cand_dog_4.png": ["Pretzel the dachshund", "Chocolate, very long ears, long body, tag collar."],
+  "cand_dog_5.png": ["Domino the dalmatian", "White with spots, eye patch, one black ear."],
+  "cand_elf_1.png": ["Classic elf", "Green tunic, red stripes, ginger fringe, waving."],
+  "cand_elf_2.png": ["Holly", "Pink tunic, blonde buns, carrying a present."],
+  "cand_elf_3.png": ["Old Fitz", "Blue tunic, beard, glasses, spanner. The mechanic."],
+  "cand_elf_4.png": ["Lanky", "Purple tunic, drooping hat, mug of cocoa."],
+  "cand_elf_5.png": ["Pip", "Tiny, hat over the eyes, candy cane."],
+  "cand_santa_1.png": ["Classic Santa", "Round and jolly, waving."],
+  "cand_santa_2.png": ["Aviator Santa", "Flight jacket, goggles on the hat, green scarf. Flight-school instructor."],
+  "cand_santa_3.png": ["Cool Santa", "Slim, sunglasses, short beard."],
+  "cand_santa_4.png": ["Professor Santa", "Round glasses, long beard, clipboard."],
+  "cand_santa_5.png": ["Big-beard Santa", "Beard to the boots, carrying a present."],
+  "style_1_chibi.png":      ["Chibi plush", "Big head, puffer jacket, cel shading, warm ink outlines. The current in-game look."],
+  "style_2_flat.png":       ["Flat modern", "No outlines, every form split into two flat tones by one light. Clean, calm, poster-like."],
+  "style_3_rubberhose.png": ["Rubber-hose cartoon", "Thick black lines, pie-cut eyes, gloved paws, hose limbs, huge grin. 1930s animation energy."],
+  "style_4_kawaii.png":     ["Kawaii sticker", "Blob shapes, dot eyes set wide, blush, a white sticker border. Soft and pastel."],
+  "style_5_pixel.png":      ["Pixel art", "Hand-placed pixels on a 25-wide grid, crisp scaling. Retro arcade."],
+};
+async function main() {
+  const res = await fetch('manifest.json');
+  const manifest = await res.json();
+  let total = 0;
+  const picksEl = document.getElementById('picks');
+  const groupsEl = document.getElementById('groups');
+  for (const g of manifest) {
+    if (g.group.endsWith('candidates') || g.group === 'dog styles') {
+      const sec = document.createElement('section');
+      sec.className = 'styles';
+      sec.innerHTML = `<h2>${g.group === 'dog styles' ? 'Earlier dog style tests' : 'Pick: ' + g.group.replace(' candidates', '')}</h2>`;
+      const grid = document.createElement('div');
+      grid.className = 'grid'; grid.style.setProperty('--cell', '230px');
+      g.files.forEach((f, i) => {
+        const [name, desc] = STYLE_META[f] || [f.replace('.png', '').replace(/^cand_/, '').replace(/_/g, ' '), ''];
+        const card = document.createElement('div');
+        card.className = 'card' + (f.includes('pixel') ? ' pixel' : '');
+        card.innerHTML = `<div class="img"><img src="sprites/${f}" alt="${name}"></div><div class="name"><span class="num">${i + 1}</span>${name}</div><div class="desc">${desc}</div>`;
+        grid.appendChild(card);
+      });
+      sec.appendChild(grid);
+      picksEl.appendChild(sec);
+      continue;
+    }
+    const sec = document.createElement('section');
+    sec.innerHTML = `<h2>${g.group} <small style="color:var(--dim);font-weight:400">(${g.files.length})</small></h2>`;
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    for (const f of g.files) {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `<div class="img"><img src="sprites/${f}" alt="${f}" loading="lazy"></div><div class="name">${f.replace('.png','')}</div>`;
+      grid.appendChild(card);
+      total++;
+      const img = card.querySelector('img');
+      img.addEventListener('load', () => { if (img.naturalWidth > img.naturalHeight * 3) card.classList.add('wide'); });
+    }
+    sec.appendChild(grid);
+    groupsEl.appendChild(sec);
+  }
+  document.getElementById('count').textContent = `${total} sprites`;
+  const size = document.getElementById('size');
+  const apply = () => { document.documentElement.style.setProperty('--cell', size.value + 'px'); document.documentElement.style.setProperty('--cellh', Math.round(size.value * 0.8) + 'px'); };
+  size.addEventListener('input', apply); apply();
+  document.getElementById('dark').addEventListener('change', e => {
+    document.querySelectorAll('.card .img').forEach(el => el.style.background = e.target.checked ? '#0e1020' : '');
+  });
+}
+main();
+</script>
+</body>
+</html>

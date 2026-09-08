@@ -1,0 +1,7 @@
+/target
+/web/hamsters.wasm
+# Copied from packs/ by build-web.sh
+/web/packs
+/web/gallery/sprites
+/web/gallery/manifest.json
+/.claude/scheduled_tasks.lock

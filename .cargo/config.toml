@@ -1,0 +1,3 @@
+# Browser plugins (storage for the scoreboard) provide these symbols from JS.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--import-undefined"]

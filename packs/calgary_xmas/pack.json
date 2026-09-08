@@ -1,0 +1,35 @@
+{
+  "name": "calgary_xmas",
+  "title": "Santa's Flight School · YYC",
+  "tower_sign": "FLIGHT SCHOOL",
+  "milestones": ["CHINOOK RIDER!", "OVER THE ROCKIES!", "SPACE!", "ORBIT!"],
+  "towns": ["Cochrane", "Airdrie", "Okotoks", "Canmore", "Banff", "Drumheller", "Red Deer", "Edmonton"],
+  "pilots": [
+    { "name": "Buddy", "word": "far" },
+    { "name": "Nanook", "word": "fast" },
+    { "name": "Pixie", "word": "floaty" }
+  ],
+  "labels": {
+    "present": "+1",
+    "trampoline": "BOING!",
+    "reindeer": "DASH AWAY!",
+    "wings": "HALLELUJAH!",
+    "firework": "WHOOSH!",
+    "sleigh": "HO HO HO!",
+    "ufo": "BEAM ME UP!",
+    "updraft": "CHINOOK!",
+    "coldwind": "FROZEN!",
+    "stormcloud": "ZAPPED!",
+    "wiggle_power": "WIGGLE POWER!",
+    "flight_over": "FLIGHT OVER",
+    "fly_again": "space or click to fly again",
+    "flap": "FLAP",
+    "crash": "SPLAT!",
+    "jump_perfect": "PERFECT JUMP!",
+    "jump_good": "GOOD JUMP!",
+    "jump_early": "TOO EARLY!",
+    "jump_missed": "MISSED THE JUMP!",
+    "restart": "RESTART",
+    "scoreboard": "SCOREBOARD"
+  }
+}

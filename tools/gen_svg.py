@@ -1,0 +1,483 @@
+#!/usr/bin/env python3
+"""Sprite generator, refined style: thin colour-matched outlines, layered
+gradient shading, rim light, soft blur on far layers, glow on lights.
+Writes SVGs to assets/svg/; tools/render_sprites.js rasterizes them."""
+import math, os, random, shutil
+
+PACK = os.environ.get("PACK", "calgary_xmas")
+OUT = os.path.join(os.path.dirname(__file__), "..", "packs", PACK, "svg")
+shutil.rmtree(OUT, ignore_errors=True)
+os.makedirs(OUT, exist_ok=True)
+
+TH = 2.2   # outline width for characters and props
+NAVY = "#1f2340"
+
+def hexrgb(h):
+    h = h.lstrip("#"); return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+def rgbhex(r, g, b):
+    return "#%02x%02x%02x" % (max(0, min(255, int(r))), max(0, min(255, int(g))), max(0, min(255, int(b))))
+def dark(h, f=0.55):
+    r, g, b = hexrgb(h); return rgbhex(r * f, g * f, b * f + 12)
+def light(h, f=0.35):
+    r, g, b = hexrgb(h); return rgbhex(r + (255 - r) * f, g + (255 - g) * f, b + (255 - b) * f)
+
+def write(name, w, h, body, defs=""):
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">\n<defs>{defs}</defs>\n{body}\n</svg>'
+    with open(os.path.join(OUT, name + ".svg"), "w") as f:
+        f.write(svg)
+
+def rg(id, stops, cx=0.35, cy=0.3, r=0.8):
+    s = "".join(f'<stop offset="{o}" stop-color="{c}" stop-opacity="{a}"/>' for o, c, a in [(x[0], x[1], x[2] if len(x) > 2 else 1) for x in stops])
+    return f'<radialGradient id="{id}" cx="{cx}" cy="{cy}" r="{r}">{s}</radialGradient>'
+def lg(id, stops, x1=0, y1=0, x2=0, y2=1):
+    s = "".join(f'<stop offset="{o}" stop-color="{c}" stop-opacity="{a}"/>' for o, c, a in [(x[0], x[1], x[2] if len(x) > 2 else 1) for x in stops])
+    return f'<linearGradient id="{id}" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}">{s}</linearGradient>'
+def blur(id, sd):
+    return f'<filter id="{id}" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="{sd}"/></filter>'
+def glow(id, color, r=0.5):
+    return rg(id, [(0, color, 0.55), (0.45, color, 0.18), (1, color, 0)], cx=0.5, cy=0.5, r=r)
+def ol(color, w=TH):
+    return f'stroke="{color}" stroke-width="{w}" stroke-linejoin="round" stroke-linecap="round"'
+
+# Shared material gradients.
+WOOD = lg("wood", [(0, "#c9915a"), (0.5, "#a8703d"), (1, "#7a4d25")])
+WOODD = lg("woodd", [(0, "#8a5a30"), (1, "#563617")])
+METAL = lg("metal", [(0, "#f2f5f9"), (0.5, "#b4bcc8"), (1, "#7b8390")])
+RED = lg("red", [(0, "#ff7d72"), (0.45, "#e63c3c"), (1, "#a91f2a")])
+SNOWG = lg("snowg", [(0, "#ffffff"), (1, "#d6e0f5")])
+GOLD = lg("gold", [(0, "#ffe89a"), (0.5, "#f2c14e"), (1, "#c98a1a")])
+
+# ---------------------------------------------------------------------------
+# Dogs
+# ---------------------------------------------------------------------------
+
+DOGS = {
+    "biscuit": dict(fur="#e8a24a", face="#fbeedc", ear="floppy", scarf="#2f8f63", scarf2="#8fd6b0", iris="#5a3418"),
+    "nanook":  dict(fur="#9aa6c2", face="#f6f8fd", ear="pointy", scarf="#d63a3a", scarf2="#ffd0a0", iris="#3f7fd6"),
+    "pixie":   dict(fur="#dcb98a", face="#fff6ea", ear="big",    scarf="#6f5bd6", scarf2="#c9bdfd", iris="#4a2e1a"),
+}
+
+# ---------------------------------------------------------------------------
+# Characters: hand-drawn chibi dogs, Santa and elves.
+# Style: shaped silhouettes, cel shading (base, shadow band, highlight),
+# dark warm outlines, big readable faces.
+# ---------------------------------------------------------------------------
+
+CT = 4.2  # character outline width
+
+def hat(cx, top, w, tilt=8, o="#6e1620"):
+    """Santa hat: floppy cone falling to the right, fur brim, pompom."""
+    return f'''<g transform="rotate({tilt} {cx} {top + w * 0.5})">
+<path d="M{cx - w*0.52},{top + w*0.5} C{cx - w*0.5},{top + w*0.15} {cx - w*0.2},{top - w*0.05} {cx + w*0.05},{top - w*0.02} C{cx + w*0.35},{top - w*0.02} {cx + w*0.55},{top - w*0.3} {cx + w*0.62},{top - w*0.34} C{cx + w*0.5},{top - w*0.1} {cx + w*0.5},{top + w*0.2} {cx + w*0.52},{top + w*0.5} Z" fill="url(#red)" {ol(o, CT)}/>
+<path d="M{cx - w*0.36},{top + w*0.34} C{cx - w*0.3},{top + w*0.1} {cx - w*0.05},{top + w*0.02} {cx + w*0.2},{top + w*0.03}" fill="none" stroke="#ffb0a8" stroke-width="{w*0.06}" opacity="0.75" stroke-linecap="round"/>
+<path d="M{cx - w*0.58},{top + w*0.62} C{cx - w*0.58},{top + w*0.4} {cx - w*0.4},{top + w*0.36} {cx - w*0.3},{top + w*0.46} C{cx - w*0.2},{top + w*0.34} {cx - w*0.05},{top + w*0.34} {cx + w*0.03},{top + w*0.46} C{cx + w*0.12},{top + w*0.34} {cx + w*0.3},{top + w*0.34} {cx + w*0.36},{top + w*0.46} C{cx + w*0.48},{top + w*0.36} {cx + w*0.6},{top + w*0.42} {cx + w*0.58},{top + w*0.62} C{cx + w*0.5},{top + w*0.72} {cx - w*0.5},{top + w*0.72} {cx - w*0.58},{top + w*0.62} Z" fill="url(#hatfur)" {ol("#b9c4dc", CT * 0.7)}/>
+<circle cx="{cx + w*0.64}" cy="{top - w*0.34}" r="{w*0.15}" fill="url(#hatfur)" {ol("#b9c4dc", CT * 0.7)}/>
+<circle cx="{cx + w*0.6}" cy="{top - w*0.39}" r="{w*0.06}" fill="#ffffff" opacity="0.9"/>
+</g>'''
+
+# Characters are generated by tools/gen_chars.py (flat cartoon style).
+
+
+write("sled", 192, 96, f'''
+<path d="M20,70 Q10,84 30,84 L170,84 Q188,84 186,64 Q184,52 170,52" fill="none" stroke="#5c6470" stroke-width="12" stroke-linecap="round"/>
+<path d="M20,70 Q10,84 30,84 L170,84 Q188,84 186,64 Q184,52 170,52" fill="none" stroke="url(#metal)" stroke-width="7" stroke-linecap="round"/>
+<rect x="28" y="30" width="136" height="20" rx="6" fill="url(#wood)" {ol("#5a3616")}/>
+<path d="M36,36 L156,36" stroke="#ffffff" stroke-width="2.5" opacity="0.35"/>
+<rect x="36" y="8" width="120" height="20" rx="6" fill="url(#sledb)" {ol("#1d3f7a")}/>
+<path d="M44,14 L148,14" stroke="#bcd6ff" stroke-width="2.5" opacity="0.6"/>
+<path d="M50,50 L46,72 M96,50 L96,72 M142,50 L146,72" stroke="#5c6470" stroke-width="7" stroke-linecap="round"/>
+''', WOOD + RED + METAL + lg("sledb", [(0, "#6fa0ff"), (1, "#2f5fc4")]))
+
+# ---------------------------------------------------------------------------
+# Workshop tower
+# ---------------------------------------------------------------------------
+
+CANE = lg("cane", [(0, "#ff6b6b"), (0.5, "#ffffff"), (1, "#ff6b6b")], x1=0, y1=0, x2=1, y2=0)
+write("tower", 320, 800, f'''
+<path d="M118,790 L136,300 L184,300 L202,790 Z" fill="url(#concrete)" {ol("#4a4a5a", 1.6)}/>
+<path d="M148,300 L152,790 M168,300 L170,790" stroke="#ffffff" stroke-width="2" opacity="0.18"/>
+<path d="M136,300 L142,790" stroke="#2a2a3a" stroke-width="3" opacity="0.25"/>
+<rect x="96" y="740" width="128" height="60" rx="8" fill="url(#concrete)" {ol("#4a4a5a", 1.6)}/>
+<rect x="132" y="756" width="56" height="44" rx="6" fill="url(#doorc)" {ol("#2a1608")}/>
+<path d="M60,236 C60,300 260,300 260,236 L268,196 L52,196 Z" fill="url(#pod)" {ol("#3a3a4a", 1.8)}/>
+<rect x="44" y="176" width="232" height="30" rx="10" fill="url(#podtop)" {ol("#3a3a4a", 1.8)}/>
+<g>{"".join(f'<rect x="{x}" y="240" width="22" height="30" rx="5" fill="url(#win)" opacity="0.95"/>' for x in range(72, 240, 32))}</g>
+<rect x="60" y="272" width="200" height="8" fill="#e63c3c" opacity="0.9"/>
+<rect x="24" y="168" width="184" height="50" rx="10" fill="url(#wood)" {ol("#5a3616")}/>
+<rect x="34" y="176" width="164" height="34" rx="6" fill="#fff6e0" {ol("#5a3616", 1.4)}/>
+<rect x="14" y="128" width="292" height="30" rx="10" fill="url(#wood)" {ol("#5a3616")}/>
+<path d="M14,126 Q40,110 70,126 Q100,110 130,126 Q160,110 190,126 Q220,110 250,126 Q280,110 306,126 L306,140 L14,140 Z" fill="url(#snowg)"/>
+<rect x="24" y="90" width="12" height="40" fill="url(#woodd)"/><rect x="284" y="90" width="12" height="40" fill="url(#woodd)"/>
+<rect x="18" y="94" width="284" height="10" rx="4" fill="url(#woodd)"/>
+<rect x="150" y="30" width="20" height="64" fill="url(#concrete)" {ol("#4a4a5a", 1.4)}/>
+<path d="M130,36 L190,36 L182,56 L138,56 Z" fill="#3a3a4a" {ol("#2a2a3a", 1.4)}/>
+<circle cx="160" cy="26" r="34" fill="url(#flameglow)"/>
+<path d="M146,38 C138,20 150,12 152,2 C158,14 166,10 168,0 C176,14 186,22 174,38 Z" fill="url(#flame)" {ol("#c2410c", 1.4)}/>
+<path d="M154,36 C150,26 158,20 160,14 C164,22 170,26 166,36 Z" fill="#ffe27a"/>
+''', WOOD + WOODD + SNOWG + lg("concrete", [(0, "#d9dbe6"), (0.5, "#b8bccd"), (1, "#8a8fa6")], x1=0, y1=0, x2=1, y2=0)
+   + lg("pod", [(0, "#8b3a3a"), (0.5, "#c94a4a"), (1, "#7a2a2a")], x1=0, y1=0, x2=1, y2=0) + lg("podtop", [(0, "#e6e8f2"), (1, "#b8bccd")])
+   + rg("win", [(0, "#fff3b0"), (1, "#ffb347")], cx=0.5, cy=0.4, r=0.7) + lg("doorc", [(0, "#5a3616"), (1, "#3a2010")])
+   + rg("flameglow", [(0, "#ffb347", 0.7), (0.5, "#ff7a1a", 0.25), (1, "#ff7a1a", 0)], cx=0.5, cy=0.5, r=0.5)
+   + lg("flame", [(0, "#ffe27a"), (0.5, "#ff8c1a"), (1, "#e6431a")]))
+
+# ---------------------------------------------------------------------------
+# Pickups
+# ---------------------------------------------------------------------------
+
+def present(name, box, ribbon):
+    write(name, 96, 96, f'''
+<rect x="10" y="34" width="76" height="56" rx="8" fill="url(#box)" {ol(dark(box, 0.55))}/>
+<rect x="6" y="26" width="84" height="20" rx="6" fill="url(#lid)" {ol(dark(box, 0.55))}/>
+<rect x="40" y="26" width="16" height="64" fill="url(#rib)"/><rect x="6" y="30" width="84" height="12" fill="url(#rib)"/>
+<path d="M48,26 C30,26 26,8 40,8 C48,8 48,20 48,26 C48,20 48,8 56,8 C70,8 66,26 48,26 Z" fill="url(#rib)" {ol(dark(ribbon, 0.6), 1.6)}/>
+<path d="M14,40 L30,40" stroke="#ffffff" stroke-width="3" opacity="0.45" stroke-linecap="round"/>
+<path d="M14,86 L82,86" stroke="#000000" stroke-width="3" opacity="0.18" stroke-linecap="round"/>
+''', lg("box", [(0, light(box, 0.2)), (1, dark(box, 0.75))]) + lg("lid", [(0, light(box, 0.35)), (1, box)]) + lg("rib", [(0, light(ribbon, 0.3)), (0.5, ribbon), (1, dark(ribbon, 0.8))], x1=0, y1=0, x2=1, y2=0))
+present("present_red", "#e03a3a", "#ffe27a")
+present("present_green", "#2f9e5b", "#ff7fa5")
+present("present_blue", "#3a7fe0", "#ffffff")
+
+write("trampoline", 224, 176, f'''
+<path d="M46,116 L30,166 M178,116 L194,166 M80,118 L74,166 M144,118 L150,166" stroke="#5c6470" stroke-width="8" stroke-linecap="round"/>
+<path d="M46,116 L30,166 M178,116 L194,166 M80,118 L74,166 M144,118 L150,166" stroke="url(#metal)" stroke-width="4" stroke-linecap="round"/>
+<ellipse cx="112" cy="108" rx="96" ry="22" fill="url(#red)" {ol("#7a1a22")}/>
+<ellipse cx="112" cy="106" rx="78" ry="14" fill="url(#mat)" {ol("#151a30", 1.6)}/>
+<path d="M40,106 Q112,96 184,106" fill="none" stroke="#ffffff" stroke-width="3" opacity="0.35" stroke-linecap="round"/>
+<circle cx="18" cy="96" r="22" fill="url(#skin)" {ol("#b9825f")}/><path d="M0,78 Q18,44 42,78 Z" fill="url(#hatg)" {ol("#1b5a3b")}/><circle cx="12" cy="94" r="3" fill="#2b1d2e"/><circle cx="26" cy="94" r="3" fill="#2b1d2e"/>
+<circle cx="206" cy="96" r="22" fill="url(#skin)" {ol("#b9825f")}/><path d="M188,78 Q206,44 230,78 Z" fill="url(#red)" {ol("#7a1a22")}/><circle cx="200" cy="94" r="3" fill="#2b1d2e"/><circle cx="214" cy="94" r="3" fill="#2b1d2e"/>
+<rect x="2" y="118" width="32" height="46" rx="8" fill="#d63a3a" {ol("#7a1a22")}/><rect x="190" y="118" width="32" height="46" rx="8" fill="#3a86d6" {ol("#1d4a80")}/>
+''', RED + METAL + rg("skin", [(0, "#ffe6cc"), (1, "#e9b48e")]) + lg("hatg", [(0, "#5fc48b"), (1, "#237a50")]) + lg("mat", [(0, "#3a4270"), (1, "#1c2140")]))
+
+write("reindeer", 224, 176, f'''
+<path d="M70,120 L40,150 M100,124 L80,158" stroke="#7a4a22" stroke-width="13" stroke-linecap="round"/><path d="M70,120 L40,150 M100,124 L80,158" stroke="#b07a48" stroke-width="7" stroke-linecap="round"/>
+<ellipse cx="96" cy="104" rx="70" ry="40" fill="url(#deer)" {ol("#6a3f1c")}/>
+<ellipse cx="100" cy="116" rx="40" ry="20" fill="#f1dcc0" opacity="0.9"/>
+<path d="M150,90 C170,60 190,60 196,74 C204,58 192,42 172,46" fill="none" stroke="#6a3f1c" stroke-width="6" stroke-linecap="round"/>
+<circle cx="168" cy="84" r="34" fill="url(#deer)" {ol("#6a3f1c")}/>
+<path d="M150,54 L140,20 M148,40 L128,30 M150,54 L160,22 M182,54 L196,20 M186,40 L208,30 M182,54 L172,22" fill="none" stroke="#6a3f1c" stroke-width="9" stroke-linecap="round"/>
+<path d="M150,54 L140,20 M148,40 L128,30 M150,54 L160,22 M182,54 L196,20 M186,40 L208,30 M182,54 L172,22" fill="none" stroke="url(#antler)" stroke-width="5" stroke-linecap="round"/>
+<ellipse cx="176" cy="78" rx="8" ry="9" fill="#ffffff" {ol("#6a3f1c", 1.4)}/><circle cx="178" cy="79" r="4.5" fill="#2b1d2e"/><circle cx="180" cy="76" r="1.6" fill="#ffffff"/>
+<circle cx="204" cy="94" r="30" fill="url(#noseg)"/>
+<circle cx="204" cy="94" r="13" fill="url(#nose)" {ol("#8a1c1c", 1.4)}/><circle cx="199" cy="89" r="4" fill="#ffffff" opacity="0.8"/>
+<path d="M50,100 L20,110 L44,124 Z" fill="url(#deer)" {ol("#6a3f1c")}/>
+<rect x="132" y="96" width="20" height="30" rx="4" fill="url(#red)" {ol("#7a1a22", 1.4)}/><circle cx="142" cy="124" r="4" fill="url(#gold)"/>
+''', rg("deer", [(0, "#d9a066"), (0.6, "#a86a3a"), (1, "#6f4520")]) + lg("antler", [(0, "#e8c48a"), (1, "#b08a4a")]) + rg("nose", [(0, "#ff7a7a"), (1, "#d61f1f")], cx=0.35, cy=0.3, r=0.8) + glow("noseg", "#ff3b3b", 0.5) + RED + GOLD)
+
+write("wings", 240, 160, f'''
+<circle cx="120" cy="80" r="78" fill="url(#halo)"/>
+<path d="M112,86 C80,40 30,30 10,60 C30,66 40,80 36,96 C56,90 76,96 92,116 C100,100 108,92 112,86 Z" fill="url(#wingf)" {ol("#7f9cd0")}/>
+<path d="M128,86 C160,40 210,30 230,60 C210,66 200,80 204,96 C184,90 164,96 148,116 C140,100 132,92 128,86 Z" fill="url(#wingf)" {ol("#7f9cd0")}/>
+<path d="M40,78 C60,70 80,80 96,100 M200,78 C180,70 160,80 144,100 M52,66 C70,62 86,72 100,90 M188,66 C170,62 154,72 140,90" fill="none" stroke="#8fb2e8" stroke-width="3" stroke-linecap="round" opacity="0.8"/>
+<ellipse cx="120" cy="48" rx="34" ry="10" fill="none" stroke="url(#gold)" stroke-width="7"/>
+<ellipse cx="120" cy="48" rx="34" ry="10" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.6"/>
+''', SNOWG + GOLD + lg("wingf", [(0, "#ffffff"), (1, "#a8c6ff")]) + glow("halo", "#fff2b0", 0.5))
+
+write("firework", 232, 112, f'''
+<path d="M6,56 L40,26 L40,86 Z" fill="url(#gold)" {ol("#a06a10")}/>
+<rect x="36" y="30" width="150" height="52" rx="22" fill="url(#mint)" {ol("#1f6b45")}/>
+<path d="M180,30 C214,36 226,50 226,56 C226,62 214,76 180,82 Z" fill="url(#gold)" {ol("#a06a10")}/>
+<path d="M50,40 C90,34 130,34 170,40" fill="none" stroke="#ffffff" stroke-width="4" opacity="0.5" stroke-linecap="round"/>
+<circle cx="110" cy="56" r="14" fill="url(#gold)" {ol("#a06a10", 1.4)}/><path d="M110,46 L114,54 L122,55 L116,60 L118,68 L110,64 L102,68 L104,60 L98,55 L106,54 Z" fill="#ffffff" opacity="0.9"/>
+''', RED + GOLD + CANE + lg("mint", [(0, "#8de3b0"), (0.5, "#3fbf7a"), (1, "#1f8a52")]))
+
+write("sleigh", 320, 176, f'''
+<g transform="translate(150 20) scale(0.62)"><ellipse cx="96" cy="104" rx="70" ry="40" fill="url(#deer)" {ol("#6a3f1c")}/><circle cx="168" cy="84" r="34" fill="url(#deer)" {ol("#6a3f1c")}/>
+<path d="M150,54 L140,20 M148,40 L128,30 M182,54 L196,20 M186,40 L208,30" fill="none" stroke="#6a3f1c" stroke-width="9" stroke-linecap="round"/><path d="M150,54 L140,20 M148,40 L128,30 M182,54 L196,20 M186,40 L208,30" fill="none" stroke="#d9b070" stroke-width="5" stroke-linecap="round"/>
+<circle cx="204" cy="94" r="13" fill="url(#nose)" {ol("#8a1c1c", 1.4)}/><circle cx="176" cy="78" r="7" fill="#ffffff"/><circle cx="178" cy="79" r="4" fill="#2b1d2e"/>
+<path d="M70,120 L40,150 M100,124 L80,158" stroke="#7a4a22" stroke-width="12" stroke-linecap="round"/><path d="M70,120 L40,150 M100,124 L80,158" stroke="#b07a48" stroke-width="7" stroke-linecap="round"/></g>
+<path d="M150,90 L120,96" stroke="#5a3616" stroke-width="3"/>
+<path d="M14,80 C10,120 30,150 70,150 L150,150 C160,150 164,140 164,130 L160,90 C160,80 150,70 140,74 Q130,78 128,90 L126,124 L60,124 L56,80 C54,66 40,60 30,64 Q14,68 14,80 Z" fill="url(#red)" {ol("#7a1a22")}/>
+<path d="M30,150 Q10,160 20,166 L170,166 Q186,166 178,150" fill="none" stroke="#a06a10" stroke-width="12" stroke-linecap="round"/><path d="M30,150 Q10,160 20,166 L170,166 Q186,166 178,150" fill="none" stroke="url(#gold)" stroke-width="6" stroke-linecap="round"/>
+<path d="M60,124 L126,124 L126,134 L60,134 Z" fill="url(#gold)"/>
+<circle cx="96" cy="86" r="26" fill="url(#skin)" {ol("#b9825f")}/><path d="M74,92 C78,118 114,118 118,92 Z" fill="url(#snowg)"/>
+<circle cx="88" cy="82" r="3.5" fill="#2b1d2e"/><circle cx="104" cy="82" r="3.5" fill="#2b1d2e"/><circle cx="96" cy="90" r="5" fill="#ff8a8a"/>
+{hat(96, 48, 56, tilt=6)}
+<rect x="64" y="104" width="64" height="24" rx="6" fill="url(#red)" {ol("#7a1a22", 1.4)}/>
+<ellipse cx="46" cy="100" rx="22" ry="26" fill="url(#sack)" {ol("#6a3f1c")}/>
+''', RED + GOLD + SNOWG + rg("deer", [(0, "#d9a066"), (0.6, "#a86a3a"), (1, "#6f4520")]) + rg("nose", [(0, "#ff7a7a"), (1, "#d61f1f")]) + rg("skin", [(0, "#ffe6cc"), (1, "#e9b48e")]) + rg("sack", [(0, "#d9a066"), (1, "#8a5a30")]))
+
+write("ufo", 256, 128, f'''
+<ellipse cx="128" cy="76" rx="120" ry="34" fill="url(#ufo)" {ol("#4a5068")}/>
+<path d="M70,60 C80,20 176,20 186,60 Z" fill="url(#dome)" {ol("#4a7ab0", 1.6)}/>
+<ellipse cx="128" cy="70" rx="118" ry="10" fill="#ffffff" opacity="0.35"/>
+{"".join(f'<g><circle cx="{x}" cy="{y}" r="16" fill="url(#lg{i%4})"/><circle cx="{x}" cy="{y}" r="7" fill="{c}"/></g>' for i,(x,y,c) in enumerate([(50,90,"#5fd07a"),(90,102,"#ff5a5a"),(128,106,"#ffe27a"),(166,102,"#5fa8ff"),(206,90,"#5fd07a")]))}
+<circle cx="128" cy="46" r="16" fill="url(#alien)" {ol("#2f7a4a", 1.4)}/><circle cx="122" cy="44" r="3" fill="#1a1216"/><circle cx="134" cy="44" r="3" fill="#1a1216"/>
+{hat(128, 18, 36, tilt=10)}
+''', lg("ufo", [(0, "#e8edf5"), (1, "#7f8ba3")]) + lg("dome", [(0, "#dff4ff", 0.9), (1, "#5fa8ff", 0.5)]) + rg("alien", [(0, "#b7f0c8"), (1, "#5fbf7f")]) + RED + SNOWG
+   + "".join(glow(f"lg{i}", c, 0.5) for i, c in enumerate(["#5fd07a", "#ff5a5a", "#ffe27a", "#5fa8ff"])))
+
+write("stormcloud", 224, 144, f'''
+<g filter="url(#soft)"><circle cx="60" cy="90" r="44" fill="#2a3050"/><circle cx="112" cy="66" r="56" fill="#2a3050"/><circle cx="168" cy="88" r="44" fill="#2a3050"/><rect x="26" y="90" width="172" height="42" rx="21" fill="#2a3050"/></g>
+<circle cx="60" cy="90" r="40" fill="url(#storm)"/><circle cx="112" cy="66" r="52" fill="url(#storm)"/><circle cx="168" cy="88" r="40" fill="url(#storm)"/><rect x="30" y="90" width="164" height="38" rx="19" fill="#3d4468"/>
+<path d="M84,62 L104,72 M140,62 L120,72" stroke="#161a30" stroke-width="6" stroke-linecap="round"/>
+<circle cx="98" cy="82" r="6" fill="#161a30"/><circle cx="126" cy="82" r="6" fill="#161a30"/>
+<path d="M98,104 Q112,92 126,104" fill="none" stroke="#161a30" stroke-width="4.5" stroke-linecap="round"/>
+''', rg("storm", [(0, "#8a92b8"), (0.55, "#565e88"), (1, "#3a4064")], cx=0.4, cy=0.3, r=0.8) + blur("soft", 3) + lg("boltg", [(0, "#fff6b0"), (1, "#ffd23a")]))
+
+# ---------------------------------------------------------------------------
+# Sky
+# ---------------------------------------------------------------------------
+
+write("moon", 256, 256, f'''
+<circle cx="128" cy="128" r="126" fill="url(#mglow)"/>
+<circle cx="128" cy="128" r="70" fill="url(#moon)"/>
+<circle cx="128" cy="128" r="70" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.5"/>
+<g opacity="0.35" fill="#b9b39a"><circle cx="104" cy="112" r="14"/><circle cx="146" cy="140" r="10"/><circle cx="120" cy="156" r="7"/><circle cx="150" cy="104" r="5"/></g>
+''', rg("moon", [(0, "#fffdf2"), (0.7, "#f3edd2"), (1, "#d9d2b0")], cx=0.4, cy=0.35, r=0.75) + glow("mglow", "#fff6c8", 0.5))
+
+def cloud(name, puffs, w, h):
+    shapes = "".join(f'<circle cx="{x}" cy="{y}" r="{r}" fill="url(#cl)"/>' for x, y, r in puffs)
+    shade = "".join(f'<circle cx="{x}" cy="{y + 10}" r="{r}" fill="#a9b8dc" opacity="0.45"/>' for x, y, r in puffs)
+    hi = "".join(f'<circle cx="{x - r*0.3}" cy="{y - r*0.35}" r="{r*0.5}" fill="#ffffff" opacity="0.55"/>' for x, y, r in puffs)
+    write(name, w, h, f'<g filter="url(#b1)"><g>{shade}</g><rect x="{w*0.12}" y="{h*0.55}" width="{w*0.76}" height="{h*0.25}" rx="{h*0.12}" fill="#e8eefb"/><g>{shapes}</g><g>{hi}</g></g>',
+          rg("cl", [(0, "#ffffff"), (0.7, "#f1f5ff"), (1, "#cfdaf2")], cx=0.4, cy=0.3, r=0.8) + blur("b1", 1.2))
+cloud("cloud_a", [(70, 90, 44), (130, 66, 60), (200, 80, 50), (250, 100, 36)], 320, 160)
+cloud("cloud_b", [(60, 80, 36), (110, 60, 46), (160, 74, 40), (200, 92, 30)], 260, 140)
+cloud("cloud_c", [(80, 100, 50), (150, 60, 70), (230, 78, 56), (300, 104, 40), (340, 116, 26)], 400, 180)
+
+write("snowflake", 64, 64, '<circle cx="32" cy="32" r="30" fill="url(#p)"/>', rg("p", [(0, "#ffffff", 1), (0.5, "#ffffff", 0.6), (1, "#ffffff", 0)], cx=0.5, cy=0.5, r=0.5))
+write("star", 64, 64, '<path d="M32,2 L38,26 L62,32 L38,38 L32,62 L26,38 L2,32 L26,26 Z" fill="#fff6c0"/><circle cx="32" cy="32" r="7" fill="#ffffff"/>')
+
+# ---------------------------------------------------------------------------
+# Parallax layers
+# ---------------------------------------------------------------------------
+
+def smooth_path(pts, W, H):
+    d = f"M{pts[0][0]},{pts[0][1]:.1f} "
+    for k in range(1, len(pts) - 1):
+        x0, y0 = pts[k]; x1, y1 = pts[k + 1]
+        d += f"Q{x0},{y0:.1f} {(x0 + x1) / 2:.1f},{(y0 + y1) / 2:.1f} "
+    d += f"L{pts[-1][0]},{pts[-1][1]:.1f} L{W},{H} L0,{H} Z"
+    return d
+
+def periodic(x, W, terms):
+    return sum(a * math.sin(2 * math.pi * k * x / W + p) for a, k, p in terms)
+
+def mountain_tile(name, W, H, seed, n_peaks, top, mid, bottom, shadow, haze, sd):
+    r = random.Random(seed)
+    peaks = [((i + r.uniform(0.15, 0.85)) * W / n_peaks, r.uniform(0.45, 0.95) * W / n_peaks, r.uniform(0.5, 1.0) * H * 0.82, r.uniform(-0.35, 0.35), r.uniform(1.6, 2.6)) for i in range(n_peaks)]
+    def height(x):
+        best = 0.0
+        for cx, w, h, skew, sharp in peaks:
+            for off in (-W, 0, W):
+                dx = x - (cx + off)
+                side_w = w * (1 + skew) if dx > 0 else w * (1 - skew)
+                t = abs(dx) / side_w
+                if t < 1:
+                    best = max(best, h * (1 - t) ** sharp + 5 * math.sin(x * 0.05 + cx))
+        return best + H * 0.10 + 10 * math.sin(2 * math.pi * 2 * x / W)
+    step = 8
+    raw = [height(x) for x in range(0, W + 1, step)]
+    sm = [(raw[k - 1] + 2 * raw[k] + raw[k + 1]) / 4 if 0 < k < len(raw) - 1 else raw[k] for k in range(len(raw))]
+    pts = [(k * step, H - sm[k]) for k in range(len(sm))]
+    d = smooth_path(pts, W, H)
+    dsh = smooth_path([(x + 40, y + 16) for x, y in pts], W + 40, H)
+    # Flat cartoon: one fill, a darker shade wedge, snow caps, and a thick
+    # ink line along the ridge.
+    body = f'<clipPath id="sil"><path d="{d}"/></clipPath>'
+    body += f'<path d="{d}" fill="{mid}"/>'
+    body += f'<path d="{dsh}" fill="{shadow}" opacity="0.5" clip-path="url(#sil)"/>'
+    body += f'<path d="{d}" fill="none" stroke="{top}" stroke-width="34" clip-path="url(#sil)"/>'
+    body += f'<path d="{d}" fill="none" stroke="#2b3a5a" stroke-width="9" stroke-linejoin="round"/>'
+    body += f'<rect x="0" y="{H * 0.55:.0f}" width="{W}" height="{H * 0.45:.0f}" fill="url(#haze)"/>'
+    write(name, W, H, body, lg("haze", [(0, haze, 0), (1, haze, 0.9)]))
+
+mountain_tile("mountains_far", 4096, 512, 3, 9, "#ffffff", "#a9c6ee", "#8d9bd0", "#6f8fc6", "#bfe0f7", 2.2)
+mountain_tile("mountains_near", 4096, 512, 11, 8, "#ffffff", "#8fb2e6", "#7d8cc4", "#5a7fc0", "#bfe0f7", 1.0)
+
+def snowhill_tile(name, W, H, terms, seed, tree_every, sd):
+    r = random.Random(seed)
+    step = 6
+    pts = [(x, H * 0.62 - periodic(x, W, terms) * H * 0.42) for x in range(0, W + 1, step)]
+    d = smooth_path(pts, W, H)
+    body = f'<clipPath id="hc"><path d="{d}"/></clipPath><g><path d="{d}" fill="#eef4ff"/>'
+    for i in range(30):
+        x = r.uniform(0, W); y = r.uniform(H * 0.3, H); rx = r.uniform(60, 180); ry = rx * 0.28
+        body += f'<ellipse cx="{x:.0f}" cy="{y:.0f}" rx="{rx:.0f}" ry="{ry:.0f}" fill="#c9daf5" opacity="0.6" clip-path="url(#hc)"/>'
+    def y_at(x):
+        k = int(x / step) % len(pts)
+        return pts[k][1]
+    for i in range(int(W / tree_every)):
+        x = i * tree_every + r.uniform(-tree_every * 0.4, tree_every * 0.4)
+        h = r.uniform(70, 140)
+        y = y_at(x % W) + 6
+        for off in (0, W, -W):
+            xx = x + off
+            body += f'<path d="M{xx:.0f},{y - h:.0f} L{xx + h*0.36:.0f},{y:.0f} L{xx - h*0.36:.0f},{y:.0f} Z" fill="#2fa353" stroke="#2b3a5a" stroke-width="5" stroke-linejoin="round"/>'
+            body += f'<path d="M{xx:.0f},{y - h:.0f} L{xx + h*0.18:.0f},{y - h*0.55:.0f} L{xx - h*0.18:.0f},{y - h*0.55:.0f} Z" fill="#ffffff" opacity="0.9"/>'
+    body += f'<path d="{d}" fill="none" stroke="#2b3a5a" stroke-width="9" stroke-linejoin="round"/></g>'
+    write(name, W, H, body)
+
+snowhill_tile("hills_far", 4096, 384, [(0.5, 3, 0.8), (0.3, 7, 2.4), (0.12, 15, 0.2), (0.08, 29, 1.1)], 5, 150, 1.0)
+snowhill_tile("hills_near", 4096, 320, [(0.55, 4, 2.9), (0.25, 9, 1.1), (0.12, 19, 0.6), (0.06, 41, 2.0)], 9, 150, 0.6)
+
+def village_tile(name, W, H, seed):
+    r = random.Random(seed)
+    body = '<g>'
+    for i in range(int(W / 52)):
+        x = i * 52 + r.uniform(-12, 12)
+        h = r.uniform(110, 190)
+        w = h * 0.42
+        for off in (0, W, -W):
+            xx = x + off
+            body += f'<rect x="{xx - 7:.0f}" y="{H - h * 0.4:.0f}" width="14" height="{h * 0.4:.0f}" fill="#8a5a30" stroke="#2b3a5a" stroke-width="4"/>'
+            for k, (hh, ww) in enumerate([(h, w), (h * 0.75, w * 0.85), (h * 0.5, w * 0.65)]):
+                body += f'<path d="M{xx:.0f},{H - hh:.0f} L{xx + ww:.0f},{H - hh * 0.35:.0f} L{xx - ww:.0f},{H - hh * 0.35:.0f} Z" fill="#2fa353" stroke="#2b3a5a" stroke-width="5" stroke-linejoin="round"/>'
+                body += f'<path d="M{xx:.0f},{H - hh:.0f} L{xx + ww * 0.55:.0f},{H - hh * 0.62:.0f} Q{xx:.0f},{H - hh * 0.55:.0f} {xx - ww * 0.55:.0f},{H - hh * 0.62:.0f} Z" fill="#ffffff" opacity="0.95"/>'
+    for i, fx in enumerate([W * 0.06, W * 0.19, W * 0.31, W * 0.43, W * 0.56, W * 0.68, W * 0.81, W * 0.93]):
+        hw = r.uniform(110, 160); hh = r.uniform(80, 120)
+        col = r.choice(["#a8483a", "#6a4a8a", "#3a6a9a", "#8a5a3a"])
+        body += f'<rect x="{fx:.0f}" y="{H - hh:.0f}" width="{hw:.0f}" height="{hh:.0f}" fill="{col}" stroke="#2b3a5a" stroke-width="5"/>'
+        body += f'<rect x="{fx + hw * 0.7:.0f}" y="{H - hh - 60:.0f}" width="16" height="40" fill="#6a4a3a" stroke="#2b3a5a" stroke-width="4"/>'
+        body += f'<path d="M{fx - 14:.0f},{H - hh:.0f} L{fx + hw / 2:.0f},{H - hh - 70:.0f} L{fx + hw + 14:.0f},{H - hh:.0f} Z" fill="#ffffff" stroke="#2b3a5a" stroke-width="5" stroke-linejoin="round"/>'
+        for wx in (fx + 18, fx + hw - 46):
+            body += f'<rect x="{wx:.0f}" y="{H - hh + 22:.0f}" width="28" height="30" rx="4" fill="#ffe27a" stroke="#2b3a5a" stroke-width="4"/>'
+        body += f'<rect x="{fx + hw / 2 - 14:.0f}" y="{H - 44:.0f}" width="28" height="44" rx="4" fill="#6a3f1c" stroke="#2b3a5a" stroke-width="4"/>'
+    # Downtown: Brookfield Place, The Bow, Suncor, Bankers Hall twins, Telus Sky; lit windows.
+    cx = W * 0.5
+    towers = [(-330, 60, 250, "#5a6a8a"), (-250, 70, 300, "#3f5678"), (-150, 90, 330, "#4a5a7a"), (-40, 70, 250, "#6a7a9a"), (60, 64, 250, "#6a7a9a"), (150, 80, 210, "#3f5678"), (250, 60, 180, "#5a6a8a")]
+    for (dx, w, h, col) in towers:
+        x = cx + dx
+        body += f'<rect x="{x:.0f}" y="{H - h:.0f}" width="{w}" height="{h}" fill="{col}" stroke="#2b3a5a" stroke-width="5"/>'
+        for wy in range(int(H - h) + 14, int(H) - 20, 22):
+            for wx in range(int(x) + 8, int(x + w) - 8, 16):
+                if r.random() < 0.7:
+                    body += f'<rect x="{wx}" y="{wy}" width="8" height="10" fill="#ffd27a" opacity="{r.uniform(0.5, 1.0):.2f}"/>'
+    # The Bow: a tall crescent of blue glass.
+    body += f'<path d="M{cx - 250:.0f},{H:.0f} L{cx - 250:.0f},{H - 300:.0f} C{cx - 210:.0f},{H - 330:.0f} {cx - 150:.0f},{H - 330:.0f} {cx - 180:.0f},{H - 300:.0f} L{cx - 180:.0f},{H:.0f} Z" fill="url(#glass)" stroke="#2b3a5a" stroke-width="5"/>'
+    body += f'<path d="M{cx - 236:.0f},{H - 290:.0f} L{cx - 194:.0f},{H - 100:.0f} M{cx - 194:.0f},{H - 290:.0f} L{cx - 236:.0f},{H - 100:.0f}" stroke="#dfe9ff" stroke-width="3" opacity="0.5"/>'
+    # Bankers Hall twin pyramid tops.
+    for dx in (-40, 60):
+        body += f'<path d="M{cx + dx:.0f},{H - 250:.0f} L{cx + dx + 35:.0f},{H - 290:.0f} L{cx + dx + 70:.0f},{H - 250:.0f} Z" fill="#8a9ab8"/>'
+    # Saddledome: the saddle roof arena to the east.
+    sx = cx + 520
+    body += f'<path d="M{sx - 150:.0f},{H:.0f} L{sx - 150:.0f},{H - 90:.0f} C{sx - 100:.0f},{H - 120:.0f} {sx - 40:.0f},{H - 40:.0f} {sx:.0f},{H - 60:.0f} C{sx + 40:.0f},{H - 40:.0f} {sx + 100:.0f},{H - 120:.0f} {sx + 150:.0f},{H - 90:.0f} L{sx + 150:.0f},{H:.0f} Z" fill="#c9c1b0"/>'
+    body += f'<path d="M{sx - 150:.0f},{H - 90:.0f} C{sx - 100:.0f},{H - 120:.0f} {sx - 40:.0f},{H - 40:.0f} {sx:.0f},{H - 60:.0f} C{sx + 40:.0f},{H - 40:.0f} {sx + 100:.0f},{H - 120:.0f} {sx + 150:.0f},{H - 90:.0f}" fill="none" stroke="#e63c3c" stroke-width="6"/>'
+    body += f'<rect x="{sx - 130:.0f}" y="{H - 40:.0f}" width="260" height="14" fill="#ffd27a" opacity="0.7"/>'
+    # Peace Bridge: the red helix tube over the Bow River, to the west.
+    px = cx - 620
+    body += f'<rect x="{px - 180:.0f}" y="{H - 30:.0f}" width="360" height="30" fill="#7f9fd0" opacity="0.7"/>'
+    body += f'<path d="M{px - 160:.0f},{H - 40:.0f} L{px + 160:.0f},{H - 40:.0f}" stroke="#e63c3c" stroke-width="10" stroke-linecap="round"/>'
+    for k in range(0, 320, 40):
+        body += f'<path d="M{px - 160 + k:.0f},{H - 40:.0f} C{px - 150 + k:.0f},{H - 100:.0f} {px - 130 + k:.0f},{H - 100:.0f} {px - 120 + k:.0f},{H - 40:.0f}" fill="none" stroke="#e63c3c" stroke-width="5"/>'
+        body += f'<path d="M{px - 140 + k:.0f},{H - 40:.0f} C{px - 130 + k:.0f},{H - 100:.0f} {px - 110 + k:.0f},{H - 100:.0f} {px - 100 + k:.0f},{H - 40:.0f}" fill="none" stroke="#ff8a8a" stroke-width="3" opacity="0.7"/>'
+    body += '</g>'
+    write(name, W, H, body, lg("pineg", [(0, "#3f8a63"), (1, "#1c4d3a")]) + glow("wglow", "#ffcc66", 0.5) + lg("glass", [(0, "#a9c4ee"), (1, "#4f6fa8")])
+          + lg("house0", [(0, "#b3584a"), (1, "#7a3a30")]) + lg("house1", [(0, "#5a7fa8"), (1, "#3a5a80")]) + blur("bl", 0.5))
+village_tile("treeline", 8192, 340, 21)
+
+def snowfield_tile(name, W, H, seed):
+    # Flat snow with a few paler drifts, no blur.
+    r = random.Random(seed)
+    body = f'<rect x="0" y="0" width="{W}" height="{H}" fill="#eef3fc"/>'
+    for i in range(14):
+        x = r.uniform(0, W); y = r.uniform(0, H); rx = r.uniform(60, 160); ry = rx * r.uniform(0.18, 0.3)
+        for dx in (0, W, -W):
+            for dy in (0, H, -H):
+                body += f'<ellipse cx="{x + dx:.0f}" cy="{y + dy:.0f}" rx="{rx:.0f}" ry="{ry:.0f}" fill="#dde6f7"/>'
+                body += f'<ellipse cx="{x + dx:.0f}" cy="{y + dy - 6:.0f}" rx="{rx * 0.8:.0f}" ry="{ry * 0.6:.0f}" fill="#ffffff"/>'
+    write(name, W, H, body)
+snowfield_tile("meadow", 512, 256, 33)
+
+W, H = 512, 256
+rnd = random.Random(7)
+lumps = "".join(f'<ellipse cx="{i + rnd.uniform(-8, 8) + dx:.0f}" cy="50" rx="{rnd.uniform(24, 44):.0f}" ry="14" fill="#ffffff" stroke="#2b3a5a" stroke-width="5"/>' for i in range(0, W, 40) for dx in (-W, 0, W))
+write("ground", W, H, f'''
+<rect x="0" y="60" width="{W}" height="{H - 60}" fill="#7f8fc4"/>
+<rect x="0" y="110" width="{W}" height="{H - 110}" fill="#5f6da6"/>
+<rect x="0" y="40" width="{W}" height="34" fill="#ffffff"/>
+{lumps}
+<rect x="0" y="52" width="{W}" height="22" fill="#ffffff"/>
+<rect x="0" y="72" width="{W}" height="6" fill="#2b3a5a"/>
+<rect x="0" y="78" width="{W}" height="10" fill="#a9b6dd"/>
+''')
+
+# ---------------------------------------------------------------------------
+# Ground props
+# ---------------------------------------------------------------------------
+
+PINE = rg("pine", [(0, "#63b98a"), (0.55, "#2c7a52"), (1, "#173f2c")], cx=0.35, cy=0.2, r=0.9)
+write("xmas_tree", 256, 336, f'''
+<ellipse cx="128" cy="326" rx="70" ry="9" fill="#2a3050" opacity="0.25"/>
+<rect x="112" y="280" width="32" height="50" fill="url(#woodd)"/>
+<path d="M128,20 L210,140 L46,140 Z" fill="url(#pine)" {ol("#173f2c")}/>
+<path d="M128,90 L232,230 L24,230 Z" fill="url(#pine)" {ol("#173f2c")}/>
+<path d="M128,170 L246,300 L10,300 Z" fill="url(#pine)" {ol("#173f2c")}/>
+<path d="M128,20 L170,82 Q128,70 86,82 Z M128,90 L182,160 Q128,146 74,160 Z M128,170 L192,250 Q128,236 64,250 Z" fill="#f4f7ff" opacity="0.9"/>
+<path d="M70,120 Q128,160 186,120 M52,210 Q128,260 204,210 M40,290 Q128,330 216,290" fill="none" stroke="url(#gold)" stroke-width="4" opacity="0.9"/>
+{"".join(f'<g><circle cx="{x}" cy="{y}" r="16" fill="url(#lg{i%4})"/><circle cx="{x}" cy="{y}" r="6" fill="{c}"/></g>' for i,(x,y,c) in enumerate([(96,128,"#ff5a5a"),(150,134,"#5fa8ff"),(76,218,"#ffe27a"),(128,236,"#ff5a5a"),(176,216,"#5fd07a"),(60,298,"#5fa8ff"),(118,314,"#ffe27a"),(182,304,"#ff5a5a")]))}
+<circle cx="128" cy="24" r="30" fill="url(#lg1)"/><path d="M128,4 L136,22 L156,24 L141,37 L146,57 L128,47 L110,57 L115,37 L100,24 L120,22 Z" fill="url(#gold)"/>
+''', WOODD + GOLD + PINE + "".join(glow(f"lg{i}", c, 0.5) for i, c in enumerate(["#ff5a5a", "#ffe27a", "#5fd07a", "#5fa8ff"])))
+
+write("pine_snow", 192, 320, f'''
+<ellipse cx="96" cy="312" rx="50" ry="7" fill="#2a3050" opacity="0.25"/>
+<rect x="84" y="250" width="24" height="68" fill="url(#woodd)"/>
+<path d="M96,10 L166,120 L26,120 Z" fill="url(#pine)" {ol("#173f2c")}/>
+<path d="M96,70 L182,196 L10,196 Z" fill="url(#pine)" {ol("#173f2c")}/>
+<path d="M96,140 L190,262 L2,262 Z" fill="url(#pine)" {ol("#173f2c")}/>
+<path d="M96,10 L134,70 Q96,58 58,70 Z M96,70 L146,144 Q96,128 46,144 Z M96,140 L152,214 Q96,198 40,214 Z" fill="#f4f7ff" opacity="0.92"/>
+''', WOODD + PINE)
+
+write("snowman", 160, 224, f'''
+<ellipse cx="80" cy="216" rx="56" ry="8" fill="#2a3050" opacity="0.25"/>
+<circle cx="80" cy="164" r="52" fill="url(#snowb)" {ol("#b9c4dc", 1.6)}/>
+<circle cx="80" cy="92" r="40" fill="url(#snowb)" {ol("#b9c4dc", 1.6)}/>
+<path d="M30,100 L0,80 M130,100 L160,80" stroke="#6a4a2a" stroke-width="5" stroke-linecap="round"/>
+<circle cx="68" cy="84" r="4.5" fill="#2b1d2e"/><circle cx="94" cy="84" r="4.5" fill="#2b1d2e"/>
+<path d="M80,92 L112,98 L80,104 Z" fill="url(#carrot)"/>
+<circle cx="80" cy="150" r="4.5" fill="#2b1d2e"/><circle cx="80" cy="172" r="4.5" fill="#2b1d2e"/>
+<path d="M44,118 Q80,140 116,118 L118,130 Q80,152 42,130 Z" fill="url(#red)"/>
+<rect x="46" y="44" width="68" height="12" rx="4" fill="#1a1a26"/><rect x="56" y="8" width="48" height="40" rx="4" fill="#1a1a26"/><rect x="56" y="34" width="48" height="7" fill="#d63a3a"/>
+''', RED + rg("snowb", [(0, "#ffffff"), (0.7, "#f0f4ff"), (1, "#c5d2ee")]) + lg("carrot", [(0, "#ffa04a"), (1, "#e06a1a")]))
+
+write("lamppost", 96, 288, f'''
+<ellipse cx="48" cy="282" rx="30" ry="6" fill="#2a3050" opacity="0.25"/>
+<circle cx="48" cy="60" r="46" fill="url(#lglow)"/>
+<rect x="42" y="90" width="12" height="190" fill="url(#iron)"/>
+<rect x="30" y="270" width="36" height="14" rx="4" fill="url(#iron)"/>
+<path d="M22,88 L74,88 L64,40 L32,40 Z" fill="url(#lamp)" {ol("#2b2d3a", 1.4)}/>
+<path d="M28,40 L68,40 L48,22 Z" fill="url(#iron)"/>
+<path d="M22,40 Q48,26 74,40" fill="#f4f7ff"/>
+<path d="M28,100 Q48,108 68,100" fill="none" stroke="#d63a3a" stroke-width="5"/><path d="M30,112 Q48,120 66,112" fill="none" stroke="#ffffff" stroke-width="5"/>
+''', rg("lamp", [(0, "#fff3b0"), (1, "#ffb347")], cx=0.5, cy=0.6, r=0.6) + glow("lglow", "#ffd27a", 0.5) + lg("iron", [(0, "#3a3d52"), (1, "#1f2130")], x1=0, y1=0, x2=1, y2=0))
+
+write("candycane", 64, 128, f'''
+<path d="M20,124 L20,40 Q20,10 44,14 Q60,18 56,40" fill="none" stroke="#c9d0e0" stroke-width="16" stroke-linecap="round"/>
+<path d="M20,124 L20,40 Q20,10 44,14 Q60,18 56,40" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round"/>
+<path d="M14,60 L28,52 M14,84 L28,76 M14,108 L28,100 M24,30 L38,18 M48,26 L58,36" stroke="#e03a3a" stroke-width="7" stroke-linecap="round"/>
+''')
+
+write("fence", 256, 96, f'''
+<rect x="20" y="10" width="20" height="82" rx="4" fill="url(#wood)" {ol("#5a3616", 1.6)}/>
+<rect x="216" y="10" width="20" height="82" rx="4" fill="url(#wood)" {ol("#5a3616", 1.6)}/>
+<rect x="6" y="28" width="244" height="14" rx="4" fill="url(#wood)" {ol("#5a3616", 1.6)}/>
+<rect x="6" y="60" width="244" height="14" rx="4" fill="url(#wood)" {ol("#5a3616", 1.6)}/>
+<path d="M4,28 Q30,12 60,28 Q90,14 128,28 Q160,12 196,28 Q226,14 252,28 L252,34 L4,34 Z" fill="#f4f7ff"/>
+<path d="M16,10 Q30,-2 44,10 Z M212,10 Q226,-2 240,10 Z" fill="#f4f7ff"/>
+''', WOOD)
+
+write("signpost", 160, 176, f'''
+<ellipse cx="80" cy="170" rx="30" ry="5" fill="#2a3050" opacity="0.25"/>
+<rect x="70" y="80" width="20" height="90" rx="4" fill="url(#woodd)" {ol("#3a2010", 1.6)}/>
+<rect x="6" y="14" width="148" height="78" rx="14" fill="url(#wood)" {ol("#5a3616")}/>
+<rect x="16" y="24" width="128" height="58" rx="8" fill="#fff6e0" {ol("#5a3616", 1.4)}/>
+<path d="M4,14 Q30,0 60,14 Q90,2 128,14 Q140,4 156,14 L156,20 L4,20 Z" fill="#f4f7ff"/>
+''', WOOD + WOODD)
+
+write("gift_pile", 192, 128, f'''
+<ellipse cx="96" cy="120" rx="80" ry="8" fill="#2a3050" opacity="0.25"/>
+<g transform="translate(10 40)"><rect x="0" y="20" width="70" height="60" rx="6" fill="url(#g1)" {ol("#1b5a3b")}/><rect x="28" y="20" width="14" height="60" fill="#ffe27a"/><rect x="0" y="40" width="70" height="12" fill="#ffe27a"/></g>
+<g transform="translate(110 46)"><rect x="0" y="20" width="64" height="54" rx="6" fill="url(#g2)" {ol("#1d4a80")}/><rect x="26" y="20" width="12" height="54" fill="#ffffff"/><rect x="0" y="40" width="64" height="10" fill="#ffffff"/></g>
+<g transform="translate(58 6)"><rect x="0" y="20" width="76" height="60" rx="6" fill="url(#g3)" {ol("#7a1a22")}/><rect x="30" y="20" width="16" height="60" fill="#ffe27a"/><rect x="0" y="42" width="76" height="12" fill="#ffe27a"/></g>
+''', lg("g1", [(0, "#5fc48b"), (1, "#237a50")]) + lg("g2", [(0, "#6fa8ff"), (1, "#2f63b8")]) + lg("g3", [(0, "#ff7d72"), (1, "#a91f2a")]))
+
+write("tuft", 96, 64, '<g filter="url(#bl)"><ellipse cx="48" cy="52" rx="42" ry="14" fill="#c9d5f0"/><ellipse cx="44" cy="46" rx="36" ry="12" fill="#ffffff"/></g>', blur("bl", 2))
+
+write("puff", 64, 64, '<circle cx="32" cy="32" r="30" fill="url(#p)"/>', rg("p", [(0, "#ffffff", 1), (0.5, "#ffffff", 0.5), (1, "#ffffff", 0)], cx=0.5, cy=0.5, r=0.5))
+write("sparkle", 64, 64, '<path d="M32,2 L37,27 L62,32 L37,37 L32,62 L27,37 L2,32 L27,27 Z" fill="#fff3a0"/><circle cx="32" cy="32" r="6" fill="#ffffff"/>')
+write("feather", 48, 64, '<path d="M24,2 C42,18 40,44 24,62 C8,44 6,18 24,2 Z" fill="#e6c9a3" stroke="#a06a3a" stroke-width="1.6"/><path d="M24,8 L24,58" stroke="#a06a3a" stroke-width="1.5"/>')
+write("ring", 64, 64, '<circle cx="32" cy="32" r="26" fill="none" stroke="#ffffff" stroke-width="5"/>')
+write("confetti", 32, 32, '<rect x="6" y="10" width="20" height="12" rx="2" fill="#ffffff"/>')
+write("vignette", 512, 288, '<rect x="0" y="0" width="512" height="288" fill="url(#v)"/>', rg("v", [(0, "#0a0c1e", 0), (0.6, "#0a0c1e", 0), (1, "#0a0c1e", 0.5)], cx=0.5, cy=0.5, r=0.7))
+
+print("wrote", len(os.listdir(OUT)), "svgs")
