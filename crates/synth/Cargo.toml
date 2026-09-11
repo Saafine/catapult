@@ -1,0 +1,7 @@
+[package]
+name = "hamsters-synth"
+version = "0.1.0"
+edition = "2021"
+description = "Procedural sound effects for the launch game: pure DSP, no platform code, has tests."
+
+[dependencies]

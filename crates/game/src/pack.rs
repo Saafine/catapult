@@ -31,8 +31,47 @@ pub struct Labels {
     pub jump_good: String,
     pub jump_early: String,
     pub jump_missed: String,
+    /// A press after the lip, in the coast. Older packs fall back to a default.
+    #[serde(default = "default_jump_late")]
+    pub jump_late: String,
     pub restart: String,
     pub scoreboard: String,
+    /// Coach lines on the results card, one per skill; the weakest one shows.
+    #[serde(default = "default_tip_push")]
+    pub tip_push: String,
+    #[serde(default = "default_tip_jump")]
+    pub tip_jump: String,
+    #[serde(default = "default_tip_air")]
+    pub tip_air: String,
+    /// The fall became a fireball; and the crash it makes.
+    #[serde(default = "default_meteor")]
+    pub meteor: String,
+    #[serde(default = "default_crash_meteor")]
+    pub crash_meteor: String,
+}
+
+fn default_meteor() -> String {
+    "METEOR!".to_owned()
+}
+
+fn default_crash_meteor() -> String {
+    "KABOOM!".to_owned()
+}
+
+fn default_tip_push() -> String {
+    "The gold zone starts at 82".to_owned()
+}
+
+fn default_tip_jump() -> String {
+    "Press when the ramp glows gold".to_owned()
+}
+
+fn default_tip_air() -> String {
+    "Flap when you're falling, not rising".to_owned()
+}
+
+fn default_jump_late() -> String {
+    "TOO LATE!".to_owned()
 }
 
 #[derive(Deserialize, Clone)]
@@ -44,6 +83,9 @@ pub struct Pack {
     pub towns: Vec<String>,
     pub pilots: Vec<PilotText>,
     pub labels: Labels,
+    /// Attribution lines for bundled music and art; shown nowhere yet.
+    #[serde(default)]
+    pub credits: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -56,6 +98,11 @@ impl Pack {
     /// working directory (native).
     pub fn sprite_dir(&self) -> String {
         format!("packs/{}/sprites", self.name)
+    }
+
+    /// Folder for optional sound overrides (`<name>.ogg` or `.wav`).
+    pub fn sound_dir(&self) -> String {
+        format!("packs/{}/sounds", self.name)
     }
 
     /// Reads `packs/active.json` (or `HAMSTERS_PACK` on native) and then the

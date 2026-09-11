@@ -88,13 +88,34 @@ def wings():
 wings()
 
 def firework():
-    b = shape("M6,56 L44,26 L44,86 Z", "#ffd23a")
-    b += rect(36, 30, 150, 52, "#3fbf7a", 22)
-    b += shape("M180,30 C214,36 226,50 226,56 C226,62 214,76 180,82 Z", "#ffd23a")
-    b += gloss(90, 42, 40, 6, 0)
-    b += circ(110, 56, 15, "#ffd23a", 5) + f'<path d="M110,46 L114,54 L122,55 L116,60 L118,68 L110,64 L102,68 L104,60 L98,55 L106,54 Z" fill="#ffffff"/>'
-    b += line("M20,44 L8,36 M18,68 L6,76", 5, "#ff6b5a")
-    write("firework", 232, 112, b)
+    # A proper fireworks rocket: striped red body, gold star, orange nose,
+    # fins, a wooden guide stick behind, and a lit fuse throwing sparks.
+    b = ""
+    # Guide stick, behind everything.
+    b += rect(4, 82, 170, 12, "#a86a3a", 4, 5)
+    b += shade("M4,88 L174,88 L174,94 L4,94 Z", 0.2)
+    # Fins.
+    b += shape("M78,36 L112,36 L96,12 L64,12 Z", "#2f6fd6")
+    b += shape("M78,84 L112,84 L96,108 L64,108 Z", "#2f6fd6")
+    # Body with stripes.
+    b += rect(66, 32, 134, 56, "#e6382f", 12)
+    b += f'<rect x="96" y="35" width="18" height="50" fill="#ffffff"/>'
+    b += f'<rect x="156" y="35" width="18" height="50" fill="#ffffff"/>'
+    b += shade("M70,66 L198,66 L198,80 Q198,86 190,86 L76,86 Q70,86 70,80 Z", 0.16)
+    b += gloss(118, 42, 42, 5, 0)
+    b += line("M66,32 L200,32 M66,88 L200,88", 5)
+    # Nose cone.
+    b += shape("M196,30 C226,34 252,50 256,60 C252,70 226,86 196,90 Z", "#ff9a1f")
+    b += shape("M204,38 C222,42 238,52 240,60 C238,68 222,78 204,82 Z", "#ffd23a", 0)
+    # Star badge.
+    b += circ(134, 60, 17, "#ffd23a", 5)
+    b += f'<path d="M134,48 L138,56 L147,57 L140,63 L142,72 L134,67 L126,72 L128,63 L121,57 L130,56 Z" fill="#ffffff"/>'
+    # Fuse and spark burst at the tail.
+    b += line("M66,60 C50,62 44,54 36,58", 5)
+    b += f'<path d="M36,58 L30,42 L34,54 L18,46 L30,58 L12,58 L30,62 L18,72 L34,64 L30,78 L38,64 L46,74 L42,62 L54,52 L42,58 Z" fill="#ffd23a" stroke="{INK}" stroke-width="4" stroke-linejoin="round"/>'
+    b += circ(36, 60, 6, "#ffffff", 0)
+    b += line("M56,44 L48,36 M58,76 L50,84", 4, "#ff6b5a")
+    write("firework", 260, 120, b)
 firework()
 
 def sleigh():
@@ -284,35 +305,147 @@ def sled():
 sled()
 
 def tower():
-    # Calgary Tower in flat style: tapered white shaft, flared collar, the
-    # red-topped pod with its ring of windows, the torch on top. The deck,
-    # sign and door stay where the game expects them.
-    b = shape("M122,790 L140,320 L180,320 L198,790 Z", "#f1f3f8")
-    b += shade("M160,320 L180,320 L198,790 L160,790 Z", 0.1)
-    b += line("M150,330 L154,790 M166,330 L168,790", 3, "#c9d0de")
-    b += rect(92, 736, 136, 64, "#f1f3f8", 8)
-    b += rect(132, 756, 56, 44, "#6a3f1c", 6)
-    # Flared collar under the pod.
-    b += shape("M104,318 L216,318 L242,262 L78,262 Z", "#dfe3ee")
-    # Pod: white lower ring, glass window band, red roof.
-    b += shape("M58,262 C58,296 262,296 262,262 L266,236 L54,236 Z", "#f1f3f8")
-    b += rect(60, 236, 200, 26, "#9fd3ff", 4, 4)
-    for x in range(72, 250, 24):
-        b += line(f"M{x},238 L{x},260", 3, "#5a7fc0")
-    b += shape("M52,238 C52,200 268,200 268,238 Z", "#e6382f")
-    b += shade("M52,238 C52,222 90,212 128,210 L128,238 Z", 0.12)
-    b += rect(44, 176, 232, 30, "#f4f6fb", 10)
-    b += rect(24, 168, 184, 50, "#c9915a", 10)
-    b += rect(34, 176, 164, 34, "#fff6e0", 6, 4)
-    b += rect(14, 128, 292, 30, "#c9915a", 10)
-    b += shape("M14,126 Q40,110 70,126 Q100,110 130,126 Q160,110 190,126 Q220,110 250,126 Q280,110 306,126 L306,140 L14,140 Z", "#ffffff", 4)
-    b += rect(24, 90, 12, 40, "#a86a3a", 3, 4) + rect(284, 90, 12, 40, "#a86a3a", 3, 4)
-    b += rect(18, 94, 284, 10, "#a86a3a", 4, 4)
-    b += rect(150, 30, 20, 64, "#f1f3f8", 4)
-    b += shape("M130,36 L190,36 L182,56 L138,56 Z", "#5a6178")
-    b += shape("M146,38 C138,20 150,12 152,2 C158,14 166,10 168,0 C176,14 186,22 174,38 Z", "#ff8c1a", 5)
-    b += shape("M154,36 C150,26 158,20 160,14 C164,22 170,26 166,36 Z", "#ffe27a", 0)
-    write("tower", 320, 800, b)
+    # The Falkbuilt building in Calgary, drawn from the photo: seen from the
+    # street corner, so the short face on the left recedes in perspective and
+    # the long front face runs off to the right. Red-brick corner pillars, a
+    # tan stucco band under the roof, two storeys of blue glass on white
+    # mullions with a dark canopy between them, a brick base course, and the
+    # warm-yellow FALKBUILT channel letters standing on the roof edge on BOTH
+    # faces at the corner, glowing. The flat roof (row 120 of 480, 30 px per
+    # metre) carries the ski jump, which is drawn by code; the letters sit
+    # under the high part of the inrun. The label is baked in, so the pack's
+    # tower_sign is empty.
+    import base64
+    W, H, ROOF = 1200, 480, 120
+    TAN, TAN2 = "#d9c9a3", "#c4b189"
+    BRICK, BRICK2, BRICK_D = "#a8402e", "#8f3324", "#7d2c20"
+    TRIM, MULL = "#3b3f4a", "#f4f6fb"
+    GLASS, GLASS2, GLASS_D, WARM = "#4a90d9", "#8cc4f5", "#3a74b3", "#ffd98a"
+    YEL, YEL_OL, GLOW = "#F5C542", "#C99A1E", "#ffd76a"
+    font = base64.b64encode(open(os.path.join(os.path.dirname(__file__), "..", "crates", "game", "assets", "LilitaOne.ttf"), "rb").read()).decode()
+    defs = f'<style>@font-face{{font-family:"LilitaGen";src:url(data:font/ttf;base64,{font});}}</style>'
+    defs += '<filter id="glow" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="8"/></filter>'
+    # Storey layout as fractions of the face height (roof 0, ground 1); the
+    # front face is 360 px tall so these match the pixel rows below.
+    V_TAN, V_G1, V_CAN, V_G2, V_BASE = 0.0, 0.236, 0.489, 0.55, 0.861
+    b = ""
+
+    # ---- left face: a trapezoid receding to the left ----
+    LX0, LX1 = 0, 240
+    def top(x): return 134.0 - 14.0 * (x - LX0) / (LX1 - LX0)
+    def bot(x): return 452.0 + 28.0 * (x - LX0) / (LX1 - LX0)
+    def fy(x, v): return top(x) + v * (bot(x) - top(x))
+    def quad(x0, x1, v0, v1, fill, sw=0, c=INK):
+        d = f"M{x0},{fy(x0,v0)} L{x1},{fy(x1,v0)} L{x1},{fy(x1,v1)} L{x0},{fy(x0,v1)} Z"
+        return shape(d, fill, sw, c) if sw else f'<path d="{d}" fill="{fill}"/>'
+    def darker(hexcol, k=0.82):
+        r, g, bl = int(hexcol[1:3], 16), int(hexcol[3:5], 16), int(hexcol[5:7], 16)
+        return "#%02x%02x%02x" % (int(r * k), int(g * k), int(bl * k))
+    b += quad(LX0, LX1, V_TAN, 1.0, darker(TAN))
+    b += quad(LX0, LX1, V_G1, V_CAN, darker(GLASS))
+    b += quad(LX0, LX1, V_G2, V_BASE, darker(GLASS))
+    # Perspective mullions: closer together towards the far (left) end.
+    xs = [LX1 - 240 * (1 - (1 - k / 9.0) ** 1.6) for k in range(10)]
+    xs = sorted(set(int(x) for x in xs))
+    for i, x in enumerate(xs):
+        for (v0, v1) in ((V_G1, V_CAN), (V_G2, V_BASE)):
+            if i + 1 < len(xs):
+                x2 = xs[i + 1]
+                pane = darker(GLASS2, 0.85)
+                if (i * 7 + int(v0 * 10)) % 3 == 0:
+                    pane = WARM
+                    b += quad(x + 2, x2 - 2, v0 + 0.02, v1 - 0.02, pane) if x2 - x > 8 else ""
+                else:
+                    b += f'<path d="M{x+2},{fy(x+2,v0+0.02)} L{x2-2},{fy(x2-2,v0+0.02)} L{x2-2},{fy(x2-2,v1-0.02)} L{x+2},{fy(x+2,v1-0.02)} Z" fill="{pane}" opacity="0.5"/>'
+            b += line(f"M{x},{fy(x,v0)} L{x},{fy(x,v1)}", 3, darker(MULL))
+    for v in (V_G1, (V_G1 + V_CAN) / 2, V_CAN, V_G2, (V_G2 + V_BASE) / 2, V_BASE):
+        b += line(f"M{LX0},{fy(LX0,v)} L{LX1},{fy(LX1,v)}", 3 if v not in (V_G1, V_G2) else 4, darker(MULL))
+    b += quad(LX0, LX1, V_CAN, V_G2, darker(TRIM))
+    b += quad(LX0, LX1, V_BASE, 1.0, darker(BRICK))
+    b += line(f"M{LX0},{fy(LX0,V_BASE)} L{LX1},{fy(LX1,V_BASE)}", 4)
+    # Snow along the receding roof edge and the eave line.
+    cap = f"M{LX0},{top(LX0)} " + " ".join(f"Q{x+10},{top(x+10)-11} {x+20},{top(x+20)}" for x in range(LX0, LX1, 20)) + f" L{LX1},{top(LX1)+7} L{LX0},{top(LX0)+7} Z"
+    b += shape(cap, "#ffffff", 3)
+    b += line(f"M{LX0},{top(LX0)+7} L{LX1},{top(LX1)+7}", 5, darker(TRIM))
+    # Letters on the left face, skewed to follow the roof line.
+    text = 'font-family="LilitaGen" font-weight="400"'
+    b += f'<g transform="skewY(-3.34)"><text x="16" y="126" font-size="46" textLength="212" lengthAdjust="spacingAndGlyphs" {text} fill="{GLOW}" opacity="0.8" filter="url(#glow)">FALKBUILT</text>'
+    b += f'<text x="16" y="126" font-size="46" textLength="212" lengthAdjust="spacingAndGlyphs" {text} fill="{darker(YEL, 0.9)}" stroke="{YEL_OL}" stroke-width="3.5" stroke-linejoin="round">FALKBUILT</text></g>'
+
+    # ---- front face ----
+    FX0, FX1 = 300, W
+    b += rect(FX0, ROOF + 6, FX1 - FX0, H - ROOF - 6, TAN, 0)
+    b += line(f"M{FX0},{ROOF+52} L{FX1},{ROOF+52} M{FX0},{ROOF+74} L{FX1},{ROOF+74}", 3, TAN2)
+    warm_panes = {(0, 3), (0, 9), (1, 1), (1, 5), (1, 6), (1, 11), (0, 14), (1, 15), (1, 16)}
+    for row, (y0, y1) in enumerate(((205, 296), (318, 430))):
+        b += rect(FX0, y0, FX1 - FX0, y1 - y0, GLASS, 0, 4)
+        for col, x in enumerate(range(FX0, FX1, 45)):
+            if (row, col) in warm_panes:
+                b += f'<rect x="{x+3}" y="{y0+3}" width="39" height="{y1-y0-6}" fill="{WARM}"/>'
+            else:
+                b += f'<rect x="{x+3}" y="{y0+3}" width="39" height="{y1-y0-6}" fill="{GLASS2}" opacity="0.55"/>'
+            b += line(f"M{x},{y0} L{x},{y1}", 4, MULL)
+        b += line(f"M{FX0},{(y0+y1)//2} L{FX1},{(y0+y1)//2}", 4, MULL)
+        b += line(f"M{FX0},{y0} L{FX1},{y0} M{FX0},{y1} L{FX1},{y1}", 5, MULL)
+    # Dark canopy between the storeys with a snow cap.
+    b += rect(FX0 - 6, 296, FX1 - FX0 + 6, 22, TRIM, 4)
+    canopy = f"M{FX0-6},296 " + " ".join(f"Q{x+15},284 {x+30},296" for x in range(FX0 - 6, FX1, 30)) + f" L{FX1},302 L{FX0-6},302 Z"
+    b += shape(canopy, "#ffffff", 3)
+    # Entrance with a wreath, right of centre.
+    b += rect(930, 350, 66, 80, MULL, 6)
+    b += rect(938, 358, 50, 72, "#dff1ff", 3, 4)
+    b += line("M963,360 L963,428", 3, "#5a7fc0")
+    b += circ(963, 382, 12, "#2e9e5b", 5) + circ(963, 382, 4.5, "#dff1ff", 0)
+    b += circ(963, 373, 3.2, "#e6382f", 0) + circ(955, 388, 3.2, "#e6382f", 0) + circ(971, 388, 3.2, "#e6382f", 0)
+    # Brick base course and the far-right brick pillar.
+    b += rect(FX0, 430, FX1 - FX0, 50, BRICK, 0)
+    b += rect(W - 64, ROOF - 6, 70, H - ROOF + 6, BRICK, 0)
+    brick = ""
+    for r, y in enumerate(range(ROOF - 2, H - 4, 14)):
+        off = 12 if r % 2 else 0
+        for x in range(W - 64 + off - 12, W, 24):
+            brick += f'<rect x="{x+2}" y="{y+2}" width="20" height="10" rx="1" fill="{BRICK2}" opacity="0.55"/>'
+        if y >= 430:
+            for x in range(FX0 + off - 12, W - 64, 24):
+                brick += f'<rect x="{x+2}" y="{y+2}" width="20" height="10" rx="1" fill="{BRICK2}" opacity="0.55"/>'
+    b += brick
+    b += line(f"M{W-64},{ROOF-6} L{W-64},{H}", 5) + line(f"M{FX0},430 L{W-64},430", 5)
+    # Roof cap with snow and the string of Christmas lights under the eave.
+    b += rect(FX0 - 6, ROOF - 2, FX1 - FX0 + 12, 16, TRIM, 4)
+    snow = f"M{FX0-6},{ROOF-2} " + " ".join(f"Q{x+13},{ROOF-16} {x+26},{ROOF-2}" for x in range(FX0 - 6, W + 12, 26)) + f" L{W+6},{ROOF+4} L{FX0-6},{ROOF+4} Z"
+    b += shape(snow, "#ffffff", 4)
+    lights = f"M{FX0},{ROOF+18} " + " ".join(f"Q{x+20},{ROOF+30} {x+40},{ROOF+18}" for x in range(FX0, W, 40))
+    b += line(lights, 3, "#2b4a2b")
+    for i, x in enumerate(range(FX0 + 12, W - 60, 22)):
+        col = ["#ff4a4a", "#ffd23a", "#3fbf7a", "#4aa3ff"][i % 4]
+        b += circ(x, ROOF + 26 + (5 if i % 2 else 0), 5, col, 3)
+
+    # ---- corner pillar: red brick, rising above the roof, with a cap ----
+    PX0, PX1 = 236, 304
+    b += rect(PX0, 96, PX1 - PX0, H - 96, BRICK, 0)
+    for r, y in enumerate(range(100, H - 4, 14)):
+        off = 12 if r % 2 else 0
+        for x in range(PX0 + off - 12, PX1 - 4, 24):
+            b += f'<rect x="{max(x+2, PX0+2)}" y="{y+2}" width="{min(20, PX1-2-max(x+2,PX0+2))}" height="10" rx="1" fill="{BRICK2}" opacity="0.55"/>'
+    b += f'<rect x="{PX0}" y="96" width="{PX1-PX0}" height="{H-96}" fill="none" {ol(5)}/>'
+    b += rect(PX0 - 6, 86, PX1 - PX0 + 12, 14, "#c9c1b0", 3, 5)
+    pcap = f"M{PX0-6},86 " + " ".join(f"Q{x+10},74 {x+20},86" for x in range(PX0 - 6, PX1 + 6, 20)) + f" L{PX1+6},91 L{PX0-6},91 Z"
+    b += shape(pcap, "#ffffff", 3)
+    b += f'<rect x="{PX0+8}" y="{ROOF+30}" width="{PX1-PX0-16}" height="{H-ROOF-80}" fill="{BRICK_D}" opacity="0.25"/>'
+
+    # ---- letters on the front face, right of the corner ----
+    b += f'<text x="318" y="{ROOF-8}" font-size="58" textLength="300" lengthAdjust="spacingAndGlyphs" {text} fill="{GLOW}" opacity="0.85" filter="url(#glow)">FALKBUILT</text>'
+    b += f'<text x="318" y="{ROOF-8}" font-size="58" textLength="300" lengthAdjust="spacingAndGlyphs" {text} fill="{YEL}" stroke="{YEL_OL}" stroke-width="4" stroke-linejoin="round">FALKBUILT</text>'
+    # A couple of bare winter trees in front, like the photo.
+    for (tx, th) in ((1080, 150), (1130, 120)):
+        trunk = f"M{tx},{H} L{tx},{H-th}"
+        b += line(trunk, 8, "#4a3a30")
+        for k in range(5):
+            y = H - th * (0.45 + 0.11 * k)
+            sp = 26 - 4 * k
+            b += line(f"M{tx},{y} L{tx-sp},{y-18} M{tx},{y} L{tx+sp},{y-16}", 4, "#4a3a30")
+            b += line(f"M{tx-sp},{y-18} L{tx-sp-8},{y-30} M{tx+sp},{y-16} L{tx+sp+7},{y-28}", 3, "#4a3a30")
+    write("tower", W, H, b, defs)
 tower()
 
 # Cloud sizes follow whatever gen_svg wrote so the game's aspect maths still holds.

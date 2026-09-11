@@ -21,6 +21,9 @@ pub const GRAVITY: f32 = 22.0;
 /// Boosters and presents are easy to touch: their hitbox is this much bigger
 /// than they look. Hazards keep their drawn size.
 pub const PICKUP_REACH: f32 = 1.7;
+/// Presents are the thing to chase, so their reach is wider still: a present
+/// that brushes an ear counts.
+pub const PRESENT_REACH: f32 = 2.8;
 /// How long a cold wind keeps the pilot frozen (no flapping, heavy drag).
 pub const FREEZE_TIME: f32 = 1.5;
 /// Downward speed at which a landing stops being a bounce and becomes a crash.
@@ -34,12 +37,23 @@ pub const PILOT_RADIUS: f32 = 1.0;
 /// Below this ground speed the run ends.
 pub const REST_SPEED: f32 = 1.5;
 
-/// Where the ski-jump lip is: the pilot leaves the ramp here.
-pub const LIP: Vec2 = Vec2::new(0.0, 9.0);
-/// Where the sled waits at the top of the ramp.
-pub const RAMP_TOP: Vec2 = Vec2::new(-16.0, 19.0);
+/// Where the ski-jump lip is: the pilot leaves the ramp here. The take-off
+/// table pokes just past the front corner of the building.
+pub const LIP: Vec2 = Vec2::new(0.0, 14.0);
+/// Where the sled waits: the start gate at the top of the inrun tower,
+/// which stands on the back of the factory roof.
+pub const RAMP_TOP: Vec2 = Vec2::new(-36.0, 25.0);
+/// Height of the factory roof the ski jump stands on, meters.
+pub const ROOF_Y: f32 = 12.0;
+/// Where the straight inrun ends and the curved transition into the
+/// take-off begins.
+pub const KICKER_X: f32 = -13.0;
+/// Height of the inrun at `KICKER_X`.
+pub const KICKER_Y: f32 = 15.0;
 /// Seconds the slide down the ramp takes at full power.
-pub const SLIDE_TIME: f32 = 1.4;
+pub const SLIDE_TIME: f32 = 1.7;
+/// Upward angle of the take-off table at the lip, degrees.
+pub const LIP_ANGLE_DEG: f32 = 40.0;
 
 /// Speed at which the power meter sweeps 0..1..0, in sweeps per second.
 pub const POWER_METER_HZ: f32 = 0.9;
@@ -51,13 +65,20 @@ pub const JUMP_PERFECT_FROM: f32 = 0.92;
 /// good press flies farther, not just higher.
 pub const JUMP_BOOST: f32 = 18.0;
 pub const JUMP_ANGLE_DEG: f32 = 45.0;
-/// Missing the jump: the sled just drops off the lip at a fraction of the speed.
-pub const MISSED_JUMP_SPEED: f32 = 0.6;
+/// Missing the jump: the sled topples off the roof edge at this crawl and
+/// the dog tumbles down the side of the building; no flapping on the way.
+pub const MISSED_JUMP_SPEED: f32 = 0.06;
+/// After the lip the sled coasts along the deck for this much extra ramp
+/// progress; a press in the coast still jumps, but later is worse, and the
+/// end of the deck is the miss. This is what makes "too late" possible.
+pub const LIP_COAST: f32 = 0.10;
+/// How far along the deck the sled coasts past the lip, meters.
+pub const LIP_DECK: f32 = 0.9;
 
 /// Upward kick from one paw wiggle, m/s.
-pub const FLAP_IMPULSE: f32 = 9.0;
+pub const FLAP_IMPULSE: f32 = 20.0;
 /// Forward kick from one paw wiggle, m/s.
-pub const FLAP_FORWARD: f32 = 1.2;
+pub const FLAP_FORWARD: f32 = 4.0;
 /// Stamina cost of one wiggle. Stamina is 0..1.
 pub const FLAP_COST: f32 = 0.08;
 /// Stamina regained per second in the air.
@@ -66,10 +87,31 @@ pub const FLAP_REGEN: f32 = 0.04;
 pub const FLAP_PRESENT_BONUS: f32 = 0.2;
 /// Minimum gap between wiggles, so holding the key isn't a jetpack.
 pub const FLAP_COOLDOWN: f32 = 0.16;
-/// A wiggle never pushes vertical speed above this.
-pub const FLAP_MAX_VY: f32 = 12.0;
+/// A wiggle never pushes vertical speed above this (at lift 1).
+pub const FLAP_MAX_VY: f32 = 26.0;
+/// Wiggles work like a wing: their lift grows with airspeed. Lift is 1 at
+/// this speed, `FLAP_LIFT_MIN` when hovering and `FLAP_LIFT_MAX` at full
+/// tilt; the kick, its cap and how fast wiggles may repeat all follow it.
+pub const FLAP_SPEED_REF: f32 = 30.0;
+pub const FLAP_LIFT_MIN: f32 = 0.6;
+pub const FLAP_LIFT_MAX: f32 = 2.2;
 /// Every this many wiggles in one run, stamina refills: the wiggle easter egg.
 pub const WIGGLE_STREAK: u32 = 25;
+
+/// The meteor: a long fall with no wiggling. From this fall speed the dog
+/// starts curling into a ball, and at `METEOR_FULL` it is a rolling
+/// fireball. A dive sheds most of its vertical drag (`DIVE_DRAG` is what is
+/// left at a full dive) and gravity pulls `DIVE_PULL` harder, so a fall
+/// from space keeps gaining speed all the way down and hits harder than
+/// any flight can.
+pub const METEOR_FROM: f32 = 28.0;
+pub const METEOR_FULL: f32 = 55.0;
+/// Seconds of uninterrupted free fall (falling, no wiggle) before the
+/// meteor can begin; it then builds in over `METEOR_RAMP` seconds more.
+pub const METEOR_AFTER: f32 = 5.0;
+pub const METEOR_RAMP: f32 = 1.0;
+pub const DIVE_DRAG: f32 = 0.12;
+pub const DIVE_PULL: f32 = 0.5;
 
 /// Altitude milestones that fire [`Event::Milestone`].
 pub const MILESTONES: [(f32, &str); 4] = [
@@ -80,6 +122,75 @@ pub const MILESTONES: [(f32, &str); 4] = [
 ];
 /// Altitude at which the sky is fully space.
 pub const SPACE_ALTITUDE: f32 = 400.0;
+
+/// The stomp: a press while falling close to the snow arms a tucked landing
+/// for this many seconds. An armed landing bounces harder, keeps its pace,
+/// and survives a harder impact.
+pub const STOMP_WINDOW: f32 = 0.22;
+/// How far above the snow a press still counts as a stomp, meters.
+pub const STOMP_REACH: f32 = 7.0;
+/// Extra restitution from a stomped landing.
+pub const STOMP_BONUS: f32 = 0.35;
+/// Crash threshold multiplier while a stomp is armed.
+pub const STOMP_CRASH_SCALE: f32 = 1.4;
+
+/// Ground surfaces repeat in segments this long, meters.
+pub const SURFACE_SEGMENT: f32 = 45.0;
+/// Frozen lakes and snow drifts only appear past this distance.
+pub const SURFACE_FROM: f32 = 150.0;
+
+/// The jet stream: a river of tailwind between these altitudes, meters.
+pub const JET_LO: f32 = 110.0;
+pub const JET_HI: f32 = 170.0;
+/// Forward push at the centre of the jet stream, m/s per second.
+pub const JET_PUSH: f32 = 9.0;
+/// Storm clouds never spawn above this altitude: the top of the sky is calm.
+pub const STORM_CEILING: f32 = 260.0;
+
+/// What the ground is made of at a given distance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Surface {
+    /// Plain snow: normal bounce and roll-out.
+    Snow,
+    /// A frozen lake: a rolling pilot keeps almost all speed and slides far.
+    Ice,
+    /// A deep drift: soft, swallows bounces, forgives a hard landing.
+    Drift,
+}
+
+/// Integer hash to 0..1, deterministic and rng-free.
+fn hash01(i: i32, salt: u32) -> f32 {
+    let mut h = (i as u32).wrapping_mul(0x9E37_79B9) ^ salt.wrapping_mul(0x85EB_CA6B);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    (h & 0xFFFF) as f32 / 65536.0
+}
+
+/// The surface under distance `x`: segments of [`SURFACE_SEGMENT`] meters,
+/// hashed, so every run agrees on where the lakes are.
+pub fn surface_at(x: f32) -> Surface {
+    if x < SURFACE_FROM {
+        return Surface::Snow;
+    }
+    let seg = (x / SURFACE_SEGMENT).floor() as i32;
+    let r = hash01(seg, 7);
+    if r < 0.18 {
+        Surface::Ice
+    } else if r < 0.28 {
+        Surface::Drift
+    } else {
+        Surface::Snow
+    }
+}
+
+/// Strength of the jet stream at an altitude: a smooth bump, 1 at the
+/// centre of the band, 0 outside it.
+pub fn jet_strength(alt: f32) -> f32 {
+    let k = ((alt - JET_LO) / (JET_HI - JET_LO)).clamp(0.0, 1.0);
+    let bump = (k * std::f32::consts::PI).sin();
+    bump * bump
+}
 
 // ---------------------------------------------------------------------------
 // Pilots
@@ -224,13 +335,18 @@ pub enum Event {
     Flap,
     /// Wiggle streak reached: stamina refilled.
     WigglePower,
+    /// The pilot tucked for a stomp just above the snow.
+    StompArmed,
     Hit(EntityKind),
-    GroundBounce { speed: f32 },
+    /// A bounce off the ground; `stomped` when the landing was armed.
+    GroundBounce { speed: f32, stomped: bool },
     /// Hit the ground so hard the run ends in a hole.
     Crashed { speed: f32 },
+    /// The fall became a meteor: the pilot has curled into a rolling ball.
+    Meteor,
     /// The jump off the ramp; quality 0..1, 1 for a press right at the lip,
-    /// 0 for a missed jump.
-    Jumped { quality: f32 },
+    /// 0 for a missed jump. `late` when the press came after the lip.
+    Jumped { quality: f32, late: bool },
     /// An altitude milestone was reached; index into [`MILESTONES`].
     Milestone(usize),
     Landed { distance: f32 },
@@ -252,6 +368,15 @@ pub struct Game {
     pub stamina: f32,
     /// Seconds until the next wiggle is allowed.
     pub flap_cooldown: f32,
+    /// Seconds the stomp stays armed; 0 when not tucked.
+    pub stomp: f32,
+    /// The push power this run locked, 0..1; for the report card.
+    pub push: f32,
+    /// Jump quality earned this run, 0..1.
+    pub jump_q: f32,
+    /// Ramp progress at the jump press (1 is the lip, past 1 the coast);
+    /// `1 + LIP_COAST` when the run coasted off unpressed.
+    pub jump_t: f32,
     /// Total wiggles this run, for stats.
     pub flaps: u32,
     pub entities: Vec<Entity>,
@@ -261,6 +386,12 @@ pub struct Game {
     pub best_distance: f32,
     /// True when the run ended head-first in the snow.
     pub crashed: bool,
+    /// The jump was missed: the dog is falling off the roof and cannot flap.
+    pub botched: bool,
+    /// The meteor event has fired for this fall.
+    was_meteor: bool,
+    /// Seconds spent falling without a wiggle; the meteor clock.
+    pub fall_time: f32,
     /// Highest milestone index reached this run, if any.
     pub milestone: Option<usize>,
     /// Where a sweet-spot launch first touches down: the landing-zone marker.
@@ -273,22 +404,35 @@ pub struct Game {
     seed: u64,
 }
 
-/// Point on the ramp for `t` in 0..1: a cubic curve from the top of the
-/// tower down to the lip, dipping below the lip so the end kicks upward.
+/// Point on the ski jump for `t` in 0..1, like a real inrun: a straight
+/// slope down from the start gate on the tower, a curved transition that
+/// dips to just above the roof, and a short take-off table that throws the
+/// sled up off the front corner of the building.
 pub fn ramp_point(t: f32) -> Vec2 {
-    let p0 = RAMP_TOP;
-    let p1 = Vec2::new(-12.0, 10.0);
-    let p2 = Vec2::new(-3.5, 4.2);
-    let p3 = LIP;
-    let u = 1.0 - t;
-    let a = u * u * u;
-    let b = 3.0 * u * u * t;
-    let c = 3.0 * u * t * t;
-    let d = t * t * t;
-    Vec2::new(
-        a * p0.x + b * p1.x + c * p2.x + d * p3.x,
-        a * p0.y + b * p1.y + c * p2.y + d * p3.y,
-    )
+    const STRAIGHT: f32 = 0.66;
+    let dir = {
+        let d = Vec2::new(KICKER_X - RAMP_TOP.x, KICKER_Y - RAMP_TOP.y);
+        let l = d.length();
+        Vec2::new(d.x / l, d.y / l)
+    };
+    if t <= STRAIGHT {
+        let k = t / STRAIGHT;
+        Vec2::new(RAMP_TOP.x + (KICKER_X - RAMP_TOP.x) * k, RAMP_TOP.y + (KICKER_Y - RAMP_TOP.y) * k)
+    } else {
+        // Cubic transition: leaves along the inrun slope, bottoms out over
+        // the roof, and lifts into the take-off at `LIP_ANGLE_DEG`.
+        let k = (t - STRAIGHT) / (1.0 - STRAIGHT);
+        let p0 = Vec2::new(KICKER_X, KICKER_Y);
+        let p1 = Vec2::new(KICKER_X + dir.x * 4.5, KICKER_Y + dir.y * 4.5);
+        let a = LIP_ANGLE_DEG.to_radians();
+        let p2 = Vec2::new(LIP.x - a.cos() * 3.0, LIP.y - a.sin() * 3.0);
+        let p3 = LIP;
+        let u = 1.0 - k;
+        Vec2::new(
+            u * u * u * p0.x + 3.0 * u * u * k * p1.x + 3.0 * u * k * k * p2.x + k * k * k * p3.x,
+            u * u * u * p0.y + 3.0 * u * u * k * p1.y + 3.0 * u * k * k * p2.y + k * k * k * p3.y,
+        )
+    }
 }
 
 impl Game {
@@ -303,6 +447,10 @@ impl Game {
             rocket: 0.0,
             stamina: 1.0,
             flap_cooldown: 0.0,
+            stomp: 0.0,
+            push: 0.0,
+            jump_q: 0.0,
+            jump_t: 0.0,
             flaps: 0,
             entities: Vec::new(),
             presents: 0,
@@ -310,6 +458,9 @@ impl Game {
             flight_time: 0.0,
             best_distance: 0.0,
             crashed: false,
+            botched: false,
+            was_meteor: false,
+            fall_time: 0.0,
             milestone: None,
             landing_x: 60.0,
             events: Vec::new(),
@@ -348,12 +499,26 @@ impl Game {
         (self.pos.y - PILOT_RADIUS).max(0.0)
     }
 
-    /// Current jump angle in degrees, if in the angle phase or sliding.
     /// Jump quality for a press at ramp progress `t`: nothing before the
-    /// window, rising to 1 at the lip.
+    /// window, rising to 1 at the lip, then falling back to 0 across the
+    /// coast so a late press is as bad as an early one.
     pub fn jump_quality(t: f32) -> f32 {
+        if t > 1.0 {
+            return (1.0 - (t - 1.0) / LIP_COAST).clamp(0.0, 1.0);
+        }
         let k = ((t - JUMP_WINDOW_START) / (1.0 - JUMP_WINDOW_START)).clamp(0.0, 1.0);
         k * k * (3.0 - 2.0 * k)
+    }
+
+    /// Where the sled is at ramp progress `t`, including the coast past the lip.
+    pub fn slide_point(t: f32) -> Vec2 {
+        if t <= 1.0 {
+            ramp_point(Self::slide_ease(t))
+        } else {
+            let d = Self::ramp_dir(1.0);
+            let k = ((t - 1.0) / LIP_COAST).clamp(0.0, 1.0) * LIP_DECK;
+            Vec2::new(LIP.x + d.x * k, LIP.y + d.y * k)
+        }
     }
 
     /// Ramp tangent direction at eased progress `e`.
@@ -369,16 +534,23 @@ impl Game {
         t.powf(2.4)
     }
 
-    /// Leave the lip: full ramp speed along the lip tangent, plus the jump
-    /// boost for the quality the press earned; a miss drops off slowly.
-    fn jump(&mut self, power: f32, quality: f32) {
-        self.pos = Vec2::new(LIP.x, LIP.y + PILOT_RADIUS);
+    /// Launch velocity for a push `power` and jump `quality`: full ramp speed
+    /// along the lip tangent plus the jump boost; a miss drops off slowly.
+    fn launch_velocity(pilot: &Pilot, power: f32, quality: f32) -> Vec2 {
         let dir = Self::ramp_dir(1.0);
-        let launch = self.pilot.launch_speed * (0.25 + 0.75 * power);
+        let launch = pilot.launch_speed * (0.25 + 0.75 * power);
         let speed = if quality > 0.0 { launch } else { launch * MISSED_JUMP_SPEED };
         let ja = JUMP_ANGLE_DEG.to_radians();
         let boost = JUMP_BOOST * quality;
-        self.vel = Vec2::new(dir.x * speed + ja.cos() * boost, dir.y * speed + ja.sin() * boost);
+        Vec2::new(dir.x * speed + ja.cos() * boost, dir.y * speed + ja.sin() * boost)
+    }
+
+    /// Leave the deck from wherever the sled is (the lip, or somewhere along
+    /// the coast) with the velocity the press earned.
+    fn jump(&mut self, power: f32, quality: f32) {
+        self.vel = Self::launch_velocity(&self.pilot, power, quality);
+        // A missed jump is a fall, not a flight: the run ends under the roof edge.
+        self.botched = quality <= 0.0;
         self.phase = Phase::Flying;
         self.events.push(Event::Launched);
     }
@@ -386,14 +558,25 @@ impl Game {
     pub fn action(&mut self) {
         match self.phase {
             Phase::AimPower { meter } => {
-                self.phase = Phase::Sliding { power: Self::meter_value(meter), t: 0.0, jump: None };
+                let power = Self::meter_value(meter);
+                self.push = power;
+                self.phase = Phase::Sliding { power, t: 0.0, jump: None };
                 self.events.push(Event::Pushed);
             }
             Phase::Sliding { power, t, jump: None } => {
-                // One press per ride: as late as possible, but before the lip.
+                // One press per ride: as close to the lip as possible. Before
+                // the lip the press is remembered and fires at the lip; in the
+                // coast it fires right now, from wherever the sled got to.
                 let q = Self::jump_quality(t).max(0.05);
-                self.phase = Phase::Sliding { power, t, jump: Some(q) };
-                self.events.push(Event::Jumped { quality: q });
+                self.jump_q = q;
+                self.jump_t = t;
+                if t > 1.0 {
+                    self.events.push(Event::Jumped { quality: q, late: true });
+                    self.jump(power, q);
+                } else {
+                    self.phase = Phase::Sliding { power, t, jump: Some(q) };
+                    self.events.push(Event::Jumped { quality: q, late: false });
+                }
             }
             Phase::Sliding { .. } => {}
             Phase::Flying => self.flap(),
@@ -402,23 +585,63 @@ impl Game {
         }
     }
 
+    /// Put the flying pilot somewhere with a velocity and an empty sky
+    /// ahead; for screenshots and tests, not play.
+    pub fn dev_place(&mut self, pos: Vec2, vel: Vec2) {
+        self.phase = Phase::Flying;
+        self.pos = pos;
+        self.vel = vel;
+        self.entities.clear();
+        self.spawned_to = pos.x + 600.0;
+    }
+
+    /// How much of a meteor the pilot is right now: 0 in normal flight, 1
+    /// when falling at `METEOR_FULL` or faster, curled into a ball.
+    pub fn meteor(&self) -> f32 {
+        if self.phase != Phase::Flying || self.vel.y >= 0.0 || self.frozen > 0.0 || self.fall_time < METEOR_AFTER {
+            return 0.0;
+        }
+        let k = ((-self.vel.y - METEOR_FROM) / (METEOR_FULL - METEOR_FROM)).clamp(0.0, 1.0);
+        let clock = ((self.fall_time - METEOR_AFTER) / METEOR_RAMP).clamp(0.0, 1.0);
+        k * k * (3.0 - 2.0 * k) * clock * clock * (3.0 - 2.0 * clock)
+    }
+
+    /// How much a wiggle does right now: lift grows with airspeed, from
+    /// `FLAP_LIFT_MIN` near a hover to `FLAP_LIFT_MAX` at speed.
+    pub fn flap_lift(&self) -> f32 {
+        let speed = self.vel.length();
+        (speed / FLAP_SPEED_REF).clamp(FLAP_LIFT_MIN, FLAP_LIFT_MAX)
+    }
+
     /// Wiggle the paws for a bit of lift. Costs stamina; ignored on cooldown,
-    /// when exhausted, or while rolling on the ground.
+    /// when exhausted, or while rolling on the ground. Faster flight makes
+    /// each wiggle lift more and lets them come quicker.
     pub fn flap(&mut self) {
-        if self.phase != Phase::Flying
-            || self.frozen > 0.0
-            || self.flap_cooldown > 0.0
+        if self.phase != Phase::Flying || self.frozen > 0.0 || self.botched {
+            return;
+        }
+        // Falling close to the snow: the press is a tuck, not a flap. It
+        // costs nothing and arms a springier landing.
+        if self.vel.y < 0.0 && self.pos.y < PILOT_RADIUS + STOMP_REACH && self.pos.y > PILOT_RADIUS + 0.01 {
+            self.stomp = STOMP_WINDOW;
+            self.events.push(Event::StompArmed);
+            return;
+        }
+        if self.flap_cooldown > 0.0
             || self.stamina < FLAP_COST
             || (self.pos.y <= PILOT_RADIUS + 0.01 && self.vel.y <= 0.0)
         {
             return;
         }
-        let p = self.pilot.flap_power;
+        let p = self.pilot.flap_power * self.flap_lift();
         let boosted = self.vel.y + FLAP_IMPULSE * p;
-        self.vel.y = boosted.min(self.vel.y.max(FLAP_MAX_VY));
+        self.vel.y = boosted.min(self.vel.y.max(FLAP_MAX_VY * self.flap_lift()));
         self.vel.x += FLAP_FORWARD * p;
         self.stamina -= FLAP_COST;
-        self.flap_cooldown = FLAP_COOLDOWN;
+        // Faster air, quicker wiggles.
+        self.flap_cooldown = FLAP_COOLDOWN / self.flap_lift().max(1.0);
+        // A wiggle is not free fall: the meteor clock starts over.
+        self.fall_time = 0.0;
         self.flaps += 1;
         self.events.push(Event::Flap);
         if self.flaps % WIGGLE_STREAK == 0 {
@@ -440,14 +663,18 @@ impl Game {
                 // Slower pushes take a little longer down the ramp.
                 let speed = 1.0 / (SLIDE_TIME * (1.25 - 0.25 * power));
                 let t2 = t + dt * speed;
-                if t2 >= 1.0 {
-                    // Off the lip with whatever jump was pressed; none is a miss.
-                    if jump.is_none() {
-                        self.events.push(Event::Jumped { quality: 0.0 });
-                    }
+                if jump.is_some() && t2 >= 1.0 {
+                    // A press before the lip fires at the lip.
+                    self.pos = Vec2::new(LIP.x, LIP.y + PILOT_RADIUS);
                     self.jump(power, jump.unwrap_or(0.0));
+                } else if t2 >= 1.0 + LIP_COAST {
+                    // Coasted off the end of the deck without a press: a miss.
+                    self.jump_q = 0.0;
+                    self.jump_t = 1.0 + LIP_COAST;
+                    self.events.push(Event::Jumped { quality: 0.0, late: false });
+                    self.jump(power, 0.0);
                 } else {
-                    let p = ramp_point(Self::slide_ease(t2));
+                    let p = Self::slide_point(t2);
                     let prev = self.pos;
                     self.pos = Vec2::new(p.x, p.y + PILOT_RADIUS);
                     self.vel = (self.pos - prev) * (1.0 / dt);
@@ -477,6 +704,7 @@ impl Game {
     fn step_flight(&mut self, dt: f32) {
         self.flight_time += dt;
         self.flap_cooldown = (self.flap_cooldown - dt).max(0.0);
+        self.stomp = (self.stomp - dt).max(0.0);
         if self.frozen > 0.0 {
             // A block of ice flies badly: heavy drag, no lift of any kind.
             self.frozen = (self.frozen - dt).max(0.0);
@@ -484,9 +712,16 @@ impl Game {
         }
         self.stamina = (self.stamina + FLAP_REGEN * dt).min(1.0);
 
-        // Forces.
+        // The meteor clock: free fall is falling with no wiggle.
+        if self.vel.y < 0.0 && self.rocket <= 0.0 {
+            self.fall_time += dt;
+        } else {
+            self.fall_time = 0.0;
+        }
+        // Forces. A dive pulls harder the faster it falls: the meteor.
+        let dive = self.meteor();
         let g_scale = if self.glide > 0.0 { GLIDE_GRAVITY_SCALE } else { 1.0 };
-        self.vel.y -= GRAVITY * g_scale * dt;
+        self.vel.y -= GRAVITY * g_scale * (1.0 + DIVE_PULL * dive) * dt;
         if self.rocket > 0.0 {
             self.vel.x += 60.0 * dt;
             self.vel.y += 12.0 * dt;
@@ -500,7 +735,19 @@ impl Game {
         // Thinner air up high: less drag, so space runs keep their speed.
         let air = (1.0 - self.altitude() / 900.0).clamp(0.15, 1.0);
         let drag = self.pilot.drag * speed * air;
-        self.vel = self.vel * (1.0 - drag * dt).max(0.0);
+        // A ball falls clean: most of the vertical drag goes with the dive.
+        let drag_y = drag * (1.0 - (1.0 - DIVE_DRAG) * dive);
+        self.vel.x *= (1.0 - drag * dt).max(0.0);
+        self.vel.y *= (1.0 - drag_y * dt).max(0.0);
+        let m = self.meteor();
+        if m >= 0.5 && !self.was_meteor {
+            self.was_meteor = true;
+            self.events.push(Event::Meteor);
+        } else if m <= 0.0 {
+            self.was_meteor = false;
+        }
+        // The jet stream: a tailwind river high up, felt as a steady pull.
+        self.vel.x += JET_PUSH * jet_strength(self.altitude()) * dt;
 
         // Integrate.
         self.pos = self.pos + self.vel * dt;
@@ -516,10 +763,19 @@ impl Game {
         // Ground.
         if self.pos.y < PILOT_RADIUS {
             self.pos.y = PILOT_RADIUS;
+            let surface = surface_at(self.pos.x);
             if self.vel.y < 0.0 {
                 let impact = -self.vel.y;
                 let soft = self.entities.iter().any(|e| e.alive && e.kind == EntityKind::Trampoline && (e.pos.x - self.pos.x).abs() < 3.5);
-                if impact > CRASH_SPEED && !soft {
+                let armed = self.stomp > 0.0;
+                let mut crash_at = CRASH_SPEED;
+                if armed {
+                    crash_at *= STOMP_CRASH_SCALE;
+                }
+                if surface == Surface::Drift {
+                    crash_at *= 1.6;
+                }
+                if impact > crash_at && !soft {
                     // Straight into the snow: the run ends here, in a hole.
                     self.vel = Vec2::ZERO;
                     self.crashed = true;
@@ -530,16 +786,30 @@ impl Game {
                     self.events.push(Event::Landed { distance: d });
                     return;
                 }
-                self.vel.y = impact * self.pilot.bounce;
-                self.vel.x *= self.pilot.ground_grip;
+                let mut restitution = self.pilot.bounce;
+                if armed {
+                    restitution = (restitution + STOMP_BONUS).min(0.95);
+                }
+                if surface == Surface::Drift {
+                    restitution *= 0.4;
+                }
+                self.vel.y = impact * restitution;
+                let grip = match (armed, surface) {
+                    (true, _) => 1.0,
+                    (false, Surface::Ice) => 0.99,
+                    (false, _) => self.pilot.ground_grip,
+                };
+                self.vel.x *= grip;
+                self.stomp = 0.0;
                 if self.vel.y < 2.0 {
                     self.vel.y = 0.0;
                 } else {
-                    self.events.push(Event::GroundBounce { speed: impact });
+                    self.events.push(Event::GroundBounce { speed: impact, stomped: armed });
                 }
             }
             if self.vel.y == 0.0 {
-                self.vel.x *= (1.0 - 1.2 * dt).max(0.0);
+                let friction = if surface == Surface::Ice { 0.15 } else { 1.2 };
+                self.vel.x *= (1.0 - friction * dt).max(0.0);
                 if self.vel.length() < REST_SPEED {
                     self.vel = Vec2::ZERO;
                     self.phase = Phase::Landed;
@@ -558,7 +828,11 @@ impl Game {
             if !e.alive {
                 continue;
             }
-            let reach = if e.kind == EntityKind::Stormcloud { 1.0 } else { PICKUP_REACH };
+            let reach = match e.kind {
+                EntityKind::Stormcloud => 1.0,
+                EntityKind::Present => PRESENT_REACH,
+                _ => PICKUP_REACH,
+            };
             let r = e.kind.radius() * reach + PILOT_RADIUS;
             if (e.pos - hp).length_sq() <= r * r {
                 self.entities[i].alive = false;
@@ -680,50 +954,15 @@ impl Game {
             let p = at(landing * (0.72 + k as f32 * 0.03));
             push(EntityKind::Present, Vec2::new(p.x, p.y + 0.3));
         }
+        // A rocket above the arc's peak: the first flight's big moment.
+        let peak = at(landing * 0.5);
+        push(EntityKind::Firework, Vec2::new(peak.x, peak.y + 3.5));
         push(EntityKind::Trampoline, Vec2::new(landing + 3.0, EntityKind::Trampoline.radius() * 0.6));
     }
 
-    /// Samples of the flight path for a sweet-spot push at 45 degrees, in
-    /// an empty world, one sample per 2 m of travel.
+    /// The arc a typical launch flies: sweet-spot push, perfect jump.
     fn median_arc(&self) -> Vec<Vec2> {
-        let mut g = Game {
-            pilot: self.pilot,
-            phase: Phase::Flying,
-            pos: Vec2::new(LIP.x, LIP.y + PILOT_RADIUS),
-            vel: Vec2::ZERO,
-            glide: 0.0,
-            frozen: 0.0,
-            rocket: 0.0,
-            stamina: 1.0,
-            flap_cooldown: 0.0,
-            flaps: 0,
-            entities: Vec::new(),
-            presents: 0,
-            max_height: 0.0,
-            flight_time: 0.0,
-            best_distance: 0.0,
-            milestone: None,
-            landing_x: 0.0,
-            events: Vec::new(),
-            rng: Rng::new(1),
-            spawned_to: 1.0e9,
-            last_storm_x: 0.0,
-            seed: 0,
-            crashed: false,
-        };
-        let speed = self.pilot.launch_speed * (0.25 + 0.75 * 0.85);
-        let a = 45.0f32.to_radians();
-        g.vel = Vec2::new(a.cos(), a.sin()) * speed;
-        let mut out = vec![g.pos];
-        let mut steps = 0;
-        while g.phase == Phase::Flying && steps < 5000 {
-            g.step(1.0 / 120.0);
-            steps += 1;
-            if g.pos.x - out.last().unwrap().x >= 2.0 {
-                out.push(g.pos);
-            }
-        }
-        out
+        predict_arc(self.pilot, 0.85, 1.0)
     }
 
     /// Where the dog will be, in height, when it reaches `x` on a plain
@@ -759,7 +998,8 @@ impl Game {
                 EntityKind::Reindeer
             } else if roll < 0.56 {
                 EntityKind::Trampoline
-            } else if roll < 0.78 {
+            } else if roll < 0.84 {
+                // Fireworks are the crowd-pleaser: the biggest share after presents.
                 EntityKind::Firework
             } else {
                 EntityKind::Updraft
@@ -786,6 +1026,13 @@ impl Game {
                 _ => 0.0,
             };
             self.entities.push(Entity { kind, pos: Vec2::new(x, y), alive: true, dead_for: 0.0 });
+            // Every third rocket comes as a fan of three, climbing to the right.
+            if kind == EntityKind::Firework && self.rng.unit() < 0.35 {
+                for k in 1..3 {
+                    let kf = k as f32;
+                    self.entities.push(Entity { kind, pos: Vec2::new(x + kf * 3.2, y + kf * 2.4), alive: true, dead_for: 0.0 });
+                }
+            }
             if kind == EntityKind::Present {
                 let n = self.rng.range_i(2, 5);
                 for k in 1..=n {
@@ -833,8 +1080,16 @@ impl Game {
                 // On the arc the dog is projected to fly: integrate the current
                 // velocity forward to the cloud's x.
                 // A corridor around where the dog is heading in the next second or two.
-                let centre = self.projected_y(x + 2.0).clamp(8.0, 380.0);
-                let y = centre + self.rng.range(-6.0, 6.0);
+                // Half the clouds sit on the arc the dog is flying (the dodge);
+                // the rest are scattered through the sky so no altitude is
+                // ever the one storm band.
+                let on_path = self.phase == Phase::Flying && self.rng.unit() < 0.5;
+                let y = if on_path {
+                    self.projected_y(x + 2.0).clamp(8.0, STORM_CEILING) + self.rng.range(-8.0, 8.0)
+                } else {
+                    let u = self.rng.unit();
+                    8.0 + (STORM_CEILING - 8.0) * u * u
+                };
                 self.entities.push(Entity { kind: EntityKind::Stormcloud, pos: Vec2::new(x + 2.0, y), alive: true, dead_for: 0.0 });
             }
             // Rare high-altitude helpers: the sleigh cruises the upper sky,
@@ -850,6 +1105,59 @@ impl Game {
             self.separate_presents_from_storms();
         }
     }
+}
+
+/// Samples of the flight path for a push `power` and jump `quality` in an
+/// empty world, one sample per 2 m of travel, ending where the pilot lands.
+/// This is what the aim arc draws and what the opening chain is laid on.
+pub fn predict_arc(pilot: Pilot, power: f32, quality: f32) -> Vec<Vec2> {
+    let mut g = Game {
+        pilot,
+        phase: Phase::Flying,
+        pos: Vec2::new(LIP.x, LIP.y + PILOT_RADIUS),
+        vel: Game::launch_velocity(&pilot, power, quality),
+        glide: 0.0,
+        frozen: 0.0,
+        rocket: 0.0,
+        stamina: 1.0,
+        flap_cooldown: 0.0,
+        stomp: 0.0,
+        push: 0.0,
+        jump_q: 0.0,
+        jump_t: 0.0,
+        flaps: 0,
+        entities: Vec::new(),
+        presents: 0,
+        max_height: 0.0,
+        flight_time: 0.0,
+        best_distance: 0.0,
+        milestone: None,
+        landing_x: 0.0,
+        events: Vec::new(),
+        rng: Rng::new(1),
+        spawned_to: 1.0e9,
+        last_storm_x: 0.0,
+        seed: 0,
+        crashed: false,
+            botched: false,
+            was_meteor: false,
+            fall_time: 0.0,
+    };
+    let mut out = vec![g.pos];
+    let mut steps = 0;
+    while g.phase == Phase::Flying && steps < 3000 {
+        g.step(1.0 / 60.0);
+        steps += 1;
+        if g.pos.x - out.last().unwrap().x >= 2.0 {
+            out.push(g.pos);
+        }
+        // Stop at the first touchdown: the arc ends where the dog lands.
+        if g.pos.y <= PILOT_RADIUS + 1e-3 && g.vel.y <= 0.0 {
+            break;
+        }
+    }
+    out.push(Vec2::new(g.pos.x, PILOT_RADIUS));
+    out
 }
 
 #[cfg(test)]
@@ -893,8 +1201,13 @@ mod tests {
         let b = ramp_point(1.0);
         assert!((a.x - RAMP_TOP.x).abs() < 1e-4 && (a.y - RAMP_TOP.y).abs() < 1e-4);
         assert!((b.x - LIP.x).abs() < 1e-4 && (b.y - LIP.y).abs() < 1e-4);
-        // The lip kicks up: the curve is below the lip just before the end.
+        // The inrun drops from the tower, bottoms out above the roof, then
+        // rises into the lip.
         assert!(ramp_point(0.9).y < LIP.y);
+        assert!(ramp_point(0.4).y < RAMP_TOP.y && ramp_point(0.4).y > LIP.y);
+        for i in 0..=100 {
+            assert!(ramp_point(i as f32 / 100.0).y > ROOF_Y + 0.5, "ramp dips into the roof at {}", i);
+        }
     }
 
     #[test]
@@ -912,6 +1225,47 @@ mod tests {
             }
         }
         assert!(hi.distance() > lo.distance());
+    }
+
+    #[test]
+    fn a_fall_from_space_becomes_a_meteor_and_hits_harder_than_a_flight() {
+        let mut g = Game::new(PILOTS[0], 1);
+        // An empty sky: a pickup on the way down would interrupt the fall.
+        g.dev_place(Vec2::new(200.0, 350.0), Vec2::new(10.0, 0.0));
+        let mut peak = 0.0f32;
+        let mut t = 0.0f32;
+        let mut meteor_at = None;
+        for _ in 0..4000 {
+            g.step(1.0 / 120.0);
+            t += 1.0 / 120.0;
+            peak = peak.max(-g.vel.y);
+            if meteor_at.is_none() && g.events.contains(&Event::Meteor) {
+                meteor_at = Some(t);
+            }
+            if g.phase == Phase::Landed {
+                break;
+            }
+        }
+        let meteor_at = meteor_at.expect("the fall became a meteor");
+        assert!(meteor_at >= METEOR_AFTER, "meteor at {meteor_at}s");
+        let impact = g.events.iter().find_map(|e| if let Event::Crashed { speed } = e { Some(*speed) } else { None }).expect("crashed");
+        // Well past the old drag ceiling of about 45 m/s.
+        assert!(impact > 70.0, "impact {} peak {}", impact, peak);
+    }
+
+    #[test]
+    fn a_wiggle_lifts_more_and_repeats_faster_at_speed() {
+        let mut slow = Game::new(PILOTS[0], 1);
+        slow.entities.clear();
+        slow.phase = Phase::Flying;
+        slow.pos = Vec2::new(50.0, 40.0);
+        slow.vel = Vec2::new(12.0, 0.0);
+        let mut fast = slow.clone();
+        fast.vel = Vec2::new(70.0, 0.0);
+        slow.flap();
+        fast.flap();
+        assert!(fast.vel.y > slow.vel.y * 1.5, "fast {} slow {}", fast.vel.y, slow.vel.y);
+        assert!(fast.flap_cooldown < slow.flap_cooldown);
     }
 
     #[test]
@@ -952,6 +1306,33 @@ mod tests {
         assert!(late > 0.0 && none > 0.0);
         assert!(Game::jump_quality(0.99) > 0.95);
         assert_eq!(Game::jump_quality(0.3), 0.0);
+    }
+
+    #[test]
+    fn a_press_after_the_lip_is_late_and_the_deck_end_is_a_miss() {
+        let just_late = fly(1.0, 1.02);
+        let very_late = fly(1.0, 1.08);
+        assert!(just_late.events.iter().any(|e| matches!(e, Event::Jumped { late: true, .. })));
+        assert!(just_late.distance() > very_late.distance(), "{} vs {}", just_late.distance(), very_late.distance());
+        let none = fly(1.0, 2.0);
+        assert!(none.events.contains(&Event::Jumped { quality: 0.0, late: false }));
+        assert!(very_late.distance() > none.distance());
+        assert!(Game::jump_quality(1.0 + LIP_COAST) == 0.0);
+        assert!(Game::jump_quality(1.05) > 0.4 && Game::jump_quality(1.05) < 0.6);
+        // The sled leaves from the end of the deck, not the lip, on a miss.
+        assert!(Game::slide_point(1.0 + LIP_COAST).x > LIP.x + 0.5);
+    }
+
+    #[test]
+    fn predicted_arc_lands_where_a_real_flight_does() {
+        let path = predict_arc(PILOTS[0], 1.0, 1.0);
+        let real = fly(1.0, 0.999).distance();
+        let predicted = path.last().unwrap().x;
+        assert!(path.len() > 10);
+        assert!(path[..path.len() - 1].windows(2).all(|w| w[1].x > w[0].x));
+        // The prediction ignores bounces, so it lands at the first touchdown.
+        assert!(predicted > 30.0 && predicted <= real + 1.0, "predicted {predicted} real {real}");
+        assert!(predict_arc(PILOTS[0], 0.3, 1.0).last().unwrap().x < predicted);
     }
 
     #[test]
@@ -1055,6 +1436,88 @@ mod tests {
                 assert!((e.pos - *sp).length() >= 6.0, "present at {:?} inside storm at {:?}", e.pos, sp);
             }
         }
+    }
+
+    #[test]
+    fn ice_keeps_more_speed_than_snow_on_a_roll_out() {
+        // Find one ice segment and one snow segment past the surface start.
+        let mut ice = None;
+        let mut snow = None;
+        let mut x = SURFACE_FROM + SURFACE_SEGMENT / 2.0;
+        while (ice.is_none() || snow.is_none()) && x < 20_000.0 {
+            match surface_at(x) {
+                Surface::Ice if ice.is_none() => ice = Some(x),
+                Surface::Snow if snow.is_none() => snow = Some(x),
+                _ => {}
+            }
+            x += SURFACE_SEGMENT;
+        }
+        let (ice, snow) = (ice.expect("an ice segment"), snow.expect("a snow segment"));
+        let roll = |x0: f32| {
+            let mut g = Game::new(PILOTS[0], 2);
+            g.entities.clear();
+            g.phase = Phase::Flying;
+            g.pos = Vec2::new(x0, PILOT_RADIUS);
+            g.vel = Vec2::new(12.0, 0.0);
+            for _ in 0..60 {
+                g.entities.clear();
+                g.step(1.0 / 120.0);
+            }
+            g.vel.x
+        };
+        assert!(roll(ice) > roll(snow), "ice {} vs snow {}", roll(ice), roll(snow));
+        assert_eq!(surface_at(10.0), Surface::Snow);
+    }
+
+    #[test]
+    fn a_stomp_bounces_higher_and_keeps_pace() {
+        let land = |stomp: bool| {
+            let mut g = Game::new(PILOTS[0], 2);
+            g.entities.clear();
+            g.phase = Phase::Flying;
+            g.pos = Vec2::new(40.0, 2.6);
+            g.vel = Vec2::new(20.0, -12.0);
+            if stomp {
+                g.flap();
+                assert!(g.stomp > 0.0);
+                assert!(g.events.contains(&Event::StompArmed));
+            }
+            for _ in 0..40 {
+                g.entities.clear();
+                g.step(1.0 / 120.0);
+                if g.vel.y > 0.0 {
+                    break;
+                }
+            }
+            g
+        };
+        let plain = land(false);
+        let stomped = land(true);
+        assert!(stomped.vel.y > plain.vel.y, "stomped {} vs plain {}", stomped.vel.y, plain.vel.y);
+        assert!(stomped.vel.x > plain.vel.x);
+        assert!(stomped.events.iter().any(|e| matches!(e, Event::GroundBounce { stomped: true, .. })));
+        assert_eq!(stomped.stamina, 1.0, "a stomp costs no stamina");
+    }
+
+    #[test]
+    fn the_jet_stream_pulls_forward() {
+        let cruise = |alt: f32| {
+            let mut g = Game::new(Pilot { drag: 0.0, ..PILOTS[0] }, 2);
+            g.entities.clear();
+            g.phase = Phase::Flying;
+            g.glide = 1.0e6; // hold altitude roughly: light gravity
+            g.pos = Vec2::new(200.0, alt + PILOT_RADIUS);
+            g.vel = Vec2::new(20.0, 0.0);
+            for _ in 0..60 {
+                g.entities.clear();
+                g.pos.y = alt + PILOT_RADIUS;
+                g.step(1.0 / 120.0);
+            }
+            g.vel.x
+        };
+        assert!(cruise(140.0) > cruise(40.0) + 3.0, "jet {} vs low {}", cruise(140.0), cruise(40.0));
+        assert_eq!(jet_strength(40.0), 0.0);
+        assert!(jet_strength(140.0) > 0.99);
     }
 
     #[test]

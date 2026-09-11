@@ -88,7 +88,8 @@ airborne rather than launching you into orbit.
 ## Screenshots without a GPU
 
 `cargo build ... --features devkeys` adds a `P` key that does a perfect
-launch. A Playwright script that drives the page through a flight lives in
+launch, `C` for a dive that crashes, `F` for a fireworks display and `T` for
+slow motion. A Playwright script that drives the page through a flight lives in
 the session scratchpad; the feature is never part of the normal build.
 
 ## Where to add things
@@ -136,7 +137,7 @@ character candidates (`tools/gen_candidates.py`) and dog style tests
 ## How a run works
 
 1. **Push**: a swinging power gauge; press to lock it. The gold end is the sweet spot.
-2. **Ride**: the sled slides down the ramp off the Calgary Tower. Press once on the
+2. **Ride**: the sled drops down the ski-jump inrun on the Falkbuilt roof. Press once on the
    way down, as late as you can before the lip: the last stretch of the ramp glows.
    A press right at the lip is a PERFECT JUMP with a forward boost; early presses
    earn less; no press means the sled just drops off the lip at reduced speed.

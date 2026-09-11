@@ -1,7 +1,7 @@
 //! Scene drawing with sprites: sky, parallax layers, ground dressing,
 //! the workshop tower and ramp, the dog, pickups.
 
-use hamsters_core::{ramp_point, Entity, EntityKind, PILOT_RADIUS, RAMP_TOP, SPACE_ALTITUDE};
+use hamsters_core::{ramp_point, Entity, EntityKind, LIP, PILOT_RADIUS, RAMP_TOP, ROOF_Y, SPACE_ALTITUDE};
 use macroquad::prelude::*;
 
 use crate::sprites::{blit, blit_pivot, blit_standing, blit_wh, Sprites};
@@ -11,7 +11,6 @@ pub const SEED: Color = Color::new(1.0, 0.86, 0.30, 1.0);
 pub const OUTLINE: Color = Color::new(0.12, 0.14, 0.25, 1.0);
 const WOOD: Color = Color::new(0.70, 0.46, 0.25, 1.0);
 const WOOD_LIGHT: Color = Color::new(0.82, 0.60, 0.38, 1.0);
-const WOOD_DARK: Color = Color::new(0.40, 0.25, 0.12, 1.0);
 const SNOW: Color = Color::new(0.97, 0.98, 1.0, 1.0);
 
 /// Fur mid-tone per dog, used to tint the greyscale paw sprite.
@@ -19,7 +18,8 @@ const SNOW: Color = Color::new(0.97, 0.98, 1.0, 1.0);
 // World sizes of sprites, in meters (width).
 const DOG_W: f32 = 3.3;
 const DOG_FLY_SCALE: f32 = 1.8;
-const TOWER_W: f32 = 9.0;
+/// Width of the launch building (the Falkbuilt factory) in meters.
+const TOWER_W: f32 = 40.0;
 
 pub fn lerp(a: Color, b: Color, t: f32) -> Color {
     Color::new(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t)
@@ -39,25 +39,70 @@ pub fn space_factor(cam: &Cam) -> f32 {
     ((cam.y - 120.0) / (SPACE_ALTITUDE - 120.0)).clamp(0.0, 1.0)
 }
 
+/// The long afternoon: 0 at the tower, 1 by about 450 m out. The sun sinks
+/// and warms with distance, so a far flight looks like a journey.
+pub fn dusk_factor(cam: &Cam) -> f32 {
+    ((cam.x - 100.0) / 350.0).clamp(0.0, 1.0)
+}
+
+/// Vertical parallax of a scenery layer with horizontal parallax `factor`.
+/// Deliberately much larger than the horizontal one for the far layers, so
+/// climbing sinks the whole landscape down the screen and the flight reads
+/// as height: at 30 m the mountains fill the lower half, at 60 m the far
+/// ridge sits on the bottom edge, and by 90 m only sky and cloud are left.
+pub fn para_y(factor: f32) -> f32 {
+    0.25 + 0.6 * factor
+}
+
+/// How high the camera is for the scenery: 0 on the ground, 1 by 260 m.
+/// Layers wash out towards the sky colour with it (aerial perspective).
+pub fn height_haze(cam: &Cam) -> f32 {
+    smoothstep(30.0, 260.0, cam.y) * 0.6
+}
+
+const HAZE: Color = Color::new(0.74, 0.82, 0.97, 1.0);
+
+fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let k = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    k * k * (3.0 - 2.0 * k)
+}
+
+/// Tint for everything lit by the sky: white at noon, cool violet at dusk.
+pub fn daylight(cam: &Cam) -> Color {
+    lerp(WHITE, Color::new(0.72, 0.68, 0.85, 1.0), dusk_factor(cam))
+}
+
+fn mul(a: Color, b: Color) -> Color {
+    Color::new(a.r * b.r, a.g * b.g, a.b * b.b, a.a)
+}
+
 // ---------------------------------------------------------------------------
 // Sky
 // ---------------------------------------------------------------------------
 
 /// Christmas twilight that turns to space with altitude, with stars, moon and
 /// aurora ribbons.
-pub fn sky(sp: &Sprites, cam: &Cam) {
+pub fn sky(sp: &Sprites, cam: &Cam, aim_k: f32) {
     let sw = screen_width();
     let sh = screen_height();
     let t = get_time() as f32;
     let space = space_factor(cam);
-    // Each 75 m band of distance deepens the night a step.
-    let band = ((cam.x / 150.0).floor() * 0.02).clamp(0.0, 0.08);
-    let space = (space + band).min(1.0);
-    // Bright winter day: deep cyan up top, pale at the horizon; the sky
-    // only goes dark on the way into space.
-    let top = lerp(Color::new(0.24, 0.62, 0.95, 1.0), Color::new(0.01, 0.01, 0.05, 1.0), space);
-    let mid = lerp(Color::new(0.55, 0.82, 0.98, 1.0), Color::new(0.03, 0.04, 0.12, 1.0), space);
-    let low = lerp(Color::new(0.88, 0.96, 1.0, 1.0), Color::new(0.10, 0.14, 0.32, 1.0), space);
+    let dusk = dusk_factor(cam);
+    // Bright winter day: deep cyan up top, pale at the horizon. With distance
+    // the afternoon wears on: peach at the horizon, then violet, the top
+    // deepening to evening blue. Space still wins with altitude.
+    // The blue deepens with height well before space, so a climb shows in
+    // the sky even while the landscape is still in frame.
+    let alt = smoothstep(20.0, 220.0, cam.y) * 0.6;
+    let day_top = lerp(Color::new(0.24, 0.62, 0.95, 1.0), Color::new(0.12, 0.20, 0.48, 1.0), dusk);
+    let day_top = lerp(day_top, Color::new(0.10, 0.38, 0.85, 1.0), alt);
+    let day_mid = lerp(Color::new(0.55, 0.82, 0.98, 1.0), Color::new(0.55, 0.45, 0.70, 1.0), smoothstep(0.3, 1.0, dusk));
+    let day_mid = lerp(day_mid, Color::new(0.34, 0.66, 0.96, 1.0), alt);
+    let peach = lerp(Color::new(0.88, 0.96, 1.0, 1.0), Color::new(1.0, 0.72, 0.47, 1.0), smoothstep(0.15, 0.6, dusk));
+    let day_low = lerp(peach, Color::new(0.30, 0.26, 0.50, 1.0), smoothstep(0.6, 1.0, dusk));
+    let top = lerp(day_top, Color::new(0.01, 0.01, 0.05, 1.0), space);
+    let mid = lerp(day_mid, Color::new(0.03, 0.04, 0.12, 1.0), space);
+    let low = lerp(day_low, Color::new(0.10, 0.14, 0.32, 1.0), space);
     let strips = 72;
     let h = sh / strips as f32;
     for i in 0..strips {
@@ -65,8 +110,8 @@ pub fn sky(sp: &Sprites, cam: &Cam) {
         let c = if k < 0.5 { lerp(top, mid, (k / 0.5).powf(1.2)) } else { lerp(mid, low, ((k - 0.5) / 0.5).powf(1.6)) };
         draw_rectangle(0.0, i as f32 * h, sw, h + 1.0, c);
     }
-    // Stars only once the sky darkens towards space.
-    let star_a = space;
+    // Stars come out with the dusk, and fully once the sky darkens towards space.
+    let star_a = space.max(0.7 * dusk);
     let star_span = 0.55 + 0.45 * space;
     for i in 0..160 {
         let x = (hash(i, 11) * sw * 1.4 - cam.x * 0.02 * (0.5 + hash(i, 15))).rem_euclid(sw);
@@ -79,16 +124,20 @@ pub fn sky(sp: &Sprites, cam: &Cam) {
         }
     }
     // Sun by day, moon once we are up in the dark; both drift with the camera.
-    let mx = sw * 0.78 - cam.x * 0.02 * cam.zoom;
-    let my = sh * 0.20 + cam.y * 0.03 * cam.zoom;
+    // The sun sits left of the pilot picker while aiming (aim_k 1), and
+    // further right in flight.
+    let mx = sw * (0.78 - 0.23 * aim_k) - cam.x * 0.02 * cam.zoom;
+    // The sun sinks towards the horizon and warms as the afternoon wears on.
+    let my = sh * 0.20 + cam.y * 0.03 * cam.zoom + dusk * sh * 0.50;
     if space < 1.0 {
-        blit(&sp.sun, vec2(mx, my), 230.0, t * 0.05, false, Color::new(1.0, 1.0, 1.0, 1.0 - space));
+        let warm = lerp(WHITE, Color::new(1.0, 0.72, 0.45, 1.0), dusk);
+        blit(&sp.sun, vec2(mx, my), 230.0, t * 0.05, false, Color::new(warm.r, warm.g, warm.b, 1.0 - space));
     }
     if space > 0.0 {
         blit(&sp.moon, vec2(mx - 200.0, my + 40.0), 200.0, 0.0, false, Color::new(1.0, 1.0, 1.0, space));
     }
-    // Aurora fades out as we leave the atmosphere.
-    aurora(cam, t, 1.0 - space);
+    // Aurora is the reward of dusk: faint at noon, full in the evening, gone in space.
+    aurora(cam, t, (1.0 - space) * (0.35 + 0.65 * dusk));
     // Earth glow at the bottom of the screen once in space.
     if space > 0.0 {
         let strips = 12;
@@ -239,13 +288,14 @@ pub fn gusts(sp: &Sprites, cam: &Cam, speed: f32, t: f32) {
 
 /// Wispy near clouds in front of the action, parallax > 1, so speed is visible
 /// even high up where the ground is gone.
-pub fn near_clouds(sp: &Sprites, cam: &Cam, speed: f32) {
+/// `cap` limits the cloud alpha (0..1) so they never hide the dog.
+pub fn near_clouds(sp: &Sprites, cam: &Cam, speed: f32, cap: f32) {
     let sw = screen_width();
     let sh = screen_height();
     let s = cam.scale();
     let factor = 1.35;
     const PERIOD: f32 = 300.0;
-    let a = ((speed - 10.0) / 30.0).clamp(0.0, 1.0) * 0.5;
+    let a = (((speed - 10.0) / 30.0).clamp(0.0, 1.0) * 0.5).min(cap);
     if a <= 0.0 {
         return;
     }
@@ -280,9 +330,12 @@ fn layer(tex: &Texture2D, cam: &Cam, factor: f32, height_px: f32, lift_px: f32, 
 /// `smear` is horizontal motion blur in pixels: the layer is drawn three
 /// times, offset, at reduced alpha.
 fn layer_smear(tex: &Texture2D, cam: &Cam, factor: f32, height_px: f32, lift_px: f32, under: Color, fade: Color, smear: f32) {
-    let tint = lerp(Color::new(0.62, 0.66, 0.92, 1.0), WHITE, (factor / 0.8).clamp(0.0, 1.0));
-    // Near layers sink out of frame as the camera climbs, far ones barely move.
-    let factor_y = factor * factor * 0.9;
+    let light = daylight(cam);
+    let haze = height_haze(cam);
+    let tint = lerp(mul(lerp(Color::new(0.62, 0.66, 0.92, 1.0), WHITE, (factor / 0.8).clamp(0.0, 1.0)), light), mul(HAZE, light), haze);
+    let (under, fade) = (lerp(mul(under, light), mul(HAZE, light), haze), lerp(mul(fade, light), mul(HAZE, light), haze));
+    // Layers sink out of frame as the camera climbs, the near ones first.
+    let factor_y = para_y(factor);
     let sw = screen_width();
     let sh = screen_height();
     let zz = cam.zoom.powf(0.4);
@@ -294,10 +347,18 @@ fn layer_smear(tex: &Texture2D, cam: &Cam, factor: f32, height_px: f32, lift_px:
     if top > sh {
         return;
     }
-    let scroll = cam.x * factor * cam.scale();
+    // Tile phase measured in tiles at the screen centre, so it does not
+    // depend on the zoom: the layer is drawn at zoom^0.4 while the camera
+    // scrolls at full zoom, and scrolling in pixels would slide the
+    // mountains sideways every frame the zoom eases (a visible jitter).
+    let tiles = cam.x * factor * crate::PPM / (height_px * tex.width() / tex.height());
+    let phase = tiles.rem_euclid(1.0) * w;
     let passes: &[(f32, f32)] = if smear > 1.0 { &[(-1.0, 0.35), (1.0, 0.35), (0.0, 0.6)] } else { &[(0.0, 1.0)] };
     for (off, alpha) in passes {
-        let mut x = -(scroll.rem_euclid(w)) - w + off * smear;
+        let mut x = sw * 0.5 - phase + off * smear;
+        while x > -w {
+            x -= w;
+        }
         let c = Color::new(tint.r, tint.g, tint.b, *alpha);
         while x < sw {
             draw_texture_ex(tex, x, top, c, DrawTextureParams { dest_size: Some(vec2(w + 1.0, h)), ..Default::default() });
@@ -327,7 +388,7 @@ pub fn hills(sp: &Sprites, cam: &Cam, speed: f32) {
     // Lower the treeline's contrast so airborne pickups read against it.
     let sh = screen_height();
     let sw = screen_width();
-    let horizon = cam.to_screen_parallax(0.0, 0.0, 0.8 * 0.8 * 0.9).y;
+    let horizon = cam.to_screen_parallax(0.0, 0.0, para_y(0.8)).y;
     let top = horizon - 105.0 * cam.zoom.powf(0.4);
     if top < sh {
         draw_rectangle(0.0, top.max(0.0), sw, (horizon - top.max(0.0)).max(0.0), Color::new(0.35, 0.38, 0.62, 0.40));
@@ -338,19 +399,24 @@ fn meadow(sp: &Sprites, cam: &Cam, factor: f32) {
     let sw = screen_width();
     let sh = screen_height();
     let zz = cam.zoom.powf(0.4);
-    let factor_y = factor * factor * 0.9;
+    let factor_y = para_y(factor);
     let horizon = cam.to_screen_parallax(0.0, 0.0, factor_y).y - 4.0;
     if horizon > sh {
         return;
     }
     let tw = 260.0 * zz;
     let th = tw * sp.meadow.height() / sp.meadow.width();
-    let scroll = cam.x * factor * cam.scale();
-    let mut x = -(scroll.rem_euclid(tw)) - tw;
+    // Phase in tiles at the screen centre, independent of zoom (see layer_smear).
+    let phase = (cam.x * factor * crate::PPM / 260.0).rem_euclid(1.0) * tw;
+    let light = lerp(daylight(cam), mul(HAZE, daylight(cam)), height_haze(cam));
+    let mut x = sw * 0.5 - phase;
+    while x > -tw {
+        x -= tw;
+    }
     while x < sw {
         let mut y = horizon;
         while y < sh {
-            draw_texture_ex(&sp.meadow, x, y, WHITE, DrawTextureParams { dest_size: Some(vec2(tw + 1.0, th + 1.0)), ..Default::default() });
+            draw_texture_ex(&sp.meadow, x, y, light, DrawTextureParams { dest_size: Some(vec2(tw + 1.0, th + 1.0)), ..Default::default() });
             y += th;
         }
         x += tw;
@@ -371,6 +437,106 @@ fn meadow(sp: &Sprites, cam: &Cam, factor: f32) {
 const GROUND_TILE_W: f32 = 8.0;
 const GROUND_TILE_LIP: f32 = 44.0 / 256.0;
 
+/// The jet stream: long thin streaks flowing right through the tailwind
+/// band, so the river of air is visible before the pilot reaches it.
+pub fn jet_streamers(cam: &Cam, t: f32) {
+    use hamsters_core::{jet_strength, JET_HI, JET_LO, JET_PUSH};
+    let sw = screen_width();
+    let s = cam.scale();
+    // Skip entirely when the band is off screen.
+    let top = cam.to_screen(0.0, JET_HI + 6.0).y;
+    let bottom = cam.to_screen(0.0, JET_LO - 6.0).y;
+    if bottom < 0.0 || top > screen_height() {
+        return;
+    }
+    let flow = JET_PUSH * 4.0;
+    let n = 30;
+    for i in 0..n {
+        let k = i as f32 / n as f32;
+        let y = JET_LO + (JET_HI - JET_LO) * (0.04 + 0.92 * hash(i, 301));
+        let len = 6.0 + 10.0 * hash(i, 302);
+        let period = 90.0 + 60.0 * hash(i, 303);
+        // Each streak loops along a band anchored to the camera, in world
+        // space, so they scroll with the flow and parallax with the scene.
+        let phase = hash(i, 304) * period;
+        let wx = cam.x - sw * 0.5 / s - 20.0 + ((t * flow + phase) % period) * (sw / s + 40.0) / period;
+        let a = 0.25 * jet_strength(y) * (0.6 + 0.4 * hash(i, 305));
+        let p0 = cam.to_screen(wx, y);
+        let p1 = cam.to_screen(wx + len, y);
+        let col = Color::new(1.0, 1.0, 1.0, a);
+        draw_line(p0.x, p0.y, p1.x, p1.y, (0.08 + 0.06 * k) * s, col);
+        // A brighter head so the direction reads.
+        draw_circle(p1.x, p1.y, 0.09 * s, Color::new(1.0, 1.0, 1.0, a * 1.5));
+    }
+}
+
+/// Frozen lakes and snow drifts: the surfaces from the core, drawn over
+/// the ground tiles for every visible segment.
+fn surfaces(cam: &Cam, left: f32, right: f32) {
+    use hamsters_core::{surface_at, Surface, SURFACE_SEGMENT};
+    let s = cam.scale();
+    let gy = cam.to_screen(0.0, 0.0).y;
+    let first = (left / SURFACE_SEGMENT).floor() as i32;
+    let last = (right / SURFACE_SEGMENT).ceil() as i32;
+    for k in first..=last {
+        let x0 = k as f32 * SURFACE_SEGMENT;
+        match surface_at(x0 + 1.0) {
+            Surface::Snow => {}
+            Surface::Ice => {
+                // A frozen lake: a blue slab sunk into the snow, an ink edge,
+                // a white glint along the top and three cracks.
+                let a = cam.to_screen(x0 + 1.5, 0.0).x;
+                let b = cam.to_screen(x0 + SURFACE_SEGMENT - 1.5, 0.0).x;
+                let top = gy - 0.05 * s;
+                let h = 0.85 * s;
+                let ice = Color::new(0.62, 0.84, 0.97, 1.0);
+                let deep = Color::new(0.42, 0.66, 0.90, 1.0);
+                draw_rectangle(a, top, b - a, h, OUTLINE);
+                draw_rectangle(a + 0.06 * s, top + 0.06 * s, b - a - 0.12 * s, h - 0.12 * s, ice);
+                draw_rectangle(a + 0.06 * s, top + h * 0.55, b - a - 0.12 * s, h * 0.45 - 0.06 * s, deep);
+                draw_rectangle(a + 0.3 * s, top + 0.12 * s, b - a - 0.6 * s, 0.07 * s, Color::new(1.0, 1.0, 1.0, 0.9));
+                for c in 0..3 {
+                    let cx = x0 + 6.0 + hash(k * 3 + c, 311) * (SURFACE_SEGMENT - 12.0);
+                    let p = cam.to_screen(cx, 0.0);
+                    let dx = (hash(k * 3 + c, 312) - 0.5) * 3.0 * s;
+                    let dark = Color::new(0.16, 0.30, 0.55, 0.9);
+                    draw_line(p.x - dx, top + 0.1 * s, p.x, top + 0.42 * s, 0.05 * s, dark);
+                    draw_line(p.x, top + 0.42 * s, p.x + dx * 0.7, top + 0.7 * s, 0.05 * s, dark);
+                    draw_line(p.x, top + 0.42 * s, p.x + dx * 0.4, top + 0.2 * s, 0.04 * s, dark);
+                }
+                // Snowy banks at both ends so the slab sits in the ground.
+                draw_ellipse(a, top + 0.25 * s, 0.9 * s, 0.32 * s, 0.0, SNOW);
+                draw_ellipse(b, top + 0.25 * s, 0.9 * s, 0.32 * s, 0.0, SNOW);
+            }
+            Surface::Drift => {
+                // A deep drift: a low cosine hump, white with a blue lee side
+                // and an ink outline along the crest, like the hills.
+                let n = 28;
+                let h = 1.3 * s;
+                let w = SURFACE_SEGMENT - 4.0;
+                let base = gy + 0.3 * s;
+                let crest = |u: f32| gy - 0.15 * s - h * 0.5 * (1.0 - (u * std::f32::consts::TAU).cos());
+                for i in 0..n {
+                    let u0 = i as f32 / n as f32;
+                    let u1 = (i + 1) as f32 / n as f32;
+                    let p0 = cam.to_screen(x0 + 2.0 + w * u0, 0.0);
+                    let p1 = cam.to_screen(x0 + 2.0 + w * u1, 0.0);
+                    let (y0, y1) = (crest(u0), crest(u1));
+                    draw_triangle(vec2(p0.x, base), vec2(p0.x, y0), vec2(p1.x, y1), SNOW);
+                    draw_triangle(vec2(p0.x, base), vec2(p1.x, y1), vec2(p1.x, base), SNOW);
+                    if u0 >= 0.5 {
+                        let sh = Color::new(0.62, 0.72, 0.92, 0.85);
+                        let (m0, m1) = (base + (y0 - base) * 0.55, base + (y1 - base) * 0.55);
+                        draw_triangle(vec2(p0.x, base), vec2(p0.x, m0), vec2(p1.x, m1), sh);
+                        draw_triangle(vec2(p0.x, base), vec2(p1.x, m1), vec2(p1.x, base), sh);
+                    }
+                    draw_line(p0.x, y0, p1.x, y1, 0.09 * s, OUTLINE);
+                }
+            }
+        }
+    }
+}
+
 pub fn ground(sp: &Sprites, cam: &Cam, font: &Font, towns: &[String]) {
     let sw = screen_width();
     let sh = screen_height();
@@ -385,9 +551,11 @@ pub fn ground(sp: &Sprites, cam: &Cam, font: &Font, towns: &[String]) {
     let left_world = cam.x - sw * 0.5 / s;
     let first = (left_world / GROUND_TILE_W).floor();
     let mut wx = first * GROUND_TILE_W;
+    // The snow takes the evening light too, a little less than the far layers.
+    let light = lerp(WHITE, daylight(cam), 0.7);
     while cam.to_screen(wx, 0.0).x < sw {
         let x = cam.to_screen(wx, 0.0).x;
-        draw_texture_ex(&sp.ground, x, top, WHITE, DrawTextureParams { dest_size: Some(vec2(tw + 1.0, th)), ..Default::default() });
+        draw_texture_ex(&sp.ground, x, top, light, DrawTextureParams { dest_size: Some(vec2(tw + 1.0, th)), ..Default::default() });
         wx += GROUND_TILE_W;
     }
     if top + th < sh {
@@ -396,6 +564,7 @@ pub fn ground(sp: &Sprites, cam: &Cam, font: &Font, towns: &[String]) {
 
     let left = left_world - 8.0;
     let right = cam.x + sw * 0.5 / s + 8.0;
+    surfaces(cam, left, right);
     let shadow = |x: f32, w: f32| {
         draw_ellipse(x, gy + 0.06 * s, w * 0.5, 0.2 * s, 0.0, Color::new(0.2, 0.25, 0.5, 0.25));
     };
@@ -478,33 +647,11 @@ pub fn ground(sp: &Sprites, cam: &Cam, font: &Font, towns: &[String]) {
             blit_standing(&sp.tuft, foot, (0.9 + hash(k, 53) * 0.6) * s, hash(k, 54) > 0.5, WHITE);
         }
     }
-    // Distance posts every 25 m.
-    let first = (left / 25.0).floor().max(1.0) as i32;
-    let last = (right / 25.0).ceil() as i32;
-    for k in first..=last {
-        let m = k as f32 * 25.0;
-        let p = cam.to_screen(m, 0.0);
-        let big = k % 4 == 0;
-        let w = if big { 3.4 } else { 2.7 } * s;
-        let h = w * sp.signpost.height() / sp.signpost.width();
-        blit_standing(&sp.signpost, vec2(p.x, p.y + 0.02 * s), w, false, WHITE);
-        let scale = (w * 0.30 / 24.0).clamp(0.4, 1.8);
-        let label = if big && !towns.is_empty() {
-            format!("{} {}", towns[(k / 4).rem_euclid(towns.len() as i32) as usize], m as i32)
-        } else {
-            format!("{}", m as i32)
-        };
-        let d = measure_text(&label, Some(font), 24, scale);
-        draw_text_ex(
-            &label,
-            p.x - d.width / 2.0,
-            p.y - h * 0.70 + d.height * 0.5,
-            TextParams { font: Some(font), font_size: 24, font_scale: scale, color: OUTLINE, ..Default::default() },
-        );
-    }
+    // No distance posts: the HUD carries the number and the pennants mark history.
+    let _ = (font, towns);
 }
 
-/// Elves' workshop tower, the ski-jump ramp, Santa and cheering elves.
+/// The Falkbuilt factory with the ski jump on its roof, Santa and cheering elves.
 pub fn start_area(sp: &Sprites, cam: &Cam, font: &Font, label: &str) {
     let s = cam.scale();
     let sw = screen_width();
@@ -513,16 +660,18 @@ pub fn start_area(sp: &Sprites, cam: &Cam, font: &Font, label: &str) {
         let x = cam.to_screen(wx, 0.0).x;
         x > -half_w * s && x < sw + half_w * s
     };
-    if !visible(-8.0, 30.0) {
+    if !visible(-14.0, 48.0) {
         return;
     }
     let t = get_time() as f32;
 
-    // Tower: its platform top sits at RAMP_TOP.y.
+    // The Falkbuilt building: low and wide, its flat roof (row 120 of the
+    // 480 px sprite) at ROOF_Y carries the ski jump; the inrun tower stands
+    // at the back over the letters and the take-off leaves the front corner.
     let tower_h = TOWER_W * sp.tower.height() / sp.tower.width();
-    let platform_frac = 128.0 / 800.0;
-    let tower_x = RAMP_TOP.x - 1.5;
-    let tower_top_y = RAMP_TOP.y + platform_frac * tower_h;
+    let platform_frac = 120.0 / 480.0;
+    let tower_x = -21.0;
+    let tower_top_y = ROOF_Y + platform_frac * tower_h;
     let tp = cam.to_screen(tower_x, tower_top_y);
     draw_ellipse(tp.x, ground_y + 0.08 * s, TOWER_W * 0.55 * s, 0.3 * s, 0.0, Color::new(0.2, 0.25, 0.5, 0.3));
     draw_texture_ex(
@@ -532,76 +681,148 @@ pub fn start_area(sp: &Sprites, cam: &Cam, font: &Font, label: &str) {
         WHITE,
         DrawTextureParams { dest_size: Some(vec2(TOWER_W * s, tower_h * s)), ..Default::default() },
     );
-    // Sign text.
-    let sign = cam.to_screen(tower_x - (44.0 / 320.0) * TOWER_W, tower_top_y - (193.0 / 800.0) * tower_h);
-    let board_w = TOWER_W * s * (164.0 / 320.0) * 0.9;
-    let base = measure_text(label, Some(font), 20, 1.0);
-    let scale = (board_w / base.width).clamp(0.2, 1.4);
-    let d = measure_text(label, Some(font), 20, scale);
-    draw_text_ex(label, sign.x - d.width / 2.0, sign.y + d.height / 2.0, TextParams { font: Some(font), font_size: 20, font_scale: scale, color: OUTLINE, ..Default::default() });
+    // Sign text on the facade, for packs whose building has a blank board;
+    // an empty label means the sprite carries its own lettering.
+    if !label.is_empty() {
+        let sign = cam.to_screen(tower_x, tower_top_y - (160.0 / 480.0) * tower_h);
+        let board_w = TOWER_W * s * 0.5;
+        let base = measure_text(label, Some(font), 20, 1.0);
+        let scale = (board_w / base.width).clamp(0.2, 1.4);
+        let d = measure_text(label, Some(font), 20, scale);
+        draw_text_ex(label, sign.x - d.width / 2.0, sign.y + d.height / 2.0, TextParams { font: Some(font), font_size: 20, font_scale: scale, color: OUTLINE, ..Default::default() });
+    }
 
-    // Ramp: struts first, then the deck.
-    let mut pts: Vec<Vec2> = (0..=40).map(|i| { let p = ramp_point(i as f32 / 40.0); vec2(p.x, p.y) }).collect();
-    // Extend the deck a little past the lip.
-    pts.push(vec2(0.9, 9.35));
-    for i in (0..pts.len()).step_by(5) {
-        let p = pts[i];
-        if p.x > -1.0 {
-            continue;
+    // The ski jump on the roof: a wooden trestle tower at the back with the
+    // start gate on top, a straight inrun on a truss, the curved transition
+    // dipping to the roof and the take-off table cantilevered off the front
+    // corner. Snow on the deck, two tracks, a candy-cane rail.
+    let mut pts: Vec<Vec2> = (0..=48).map(|i| { let p = ramp_point(i as f32 / 48.0); vec2(p.x, p.y) }).collect();
+    // Extend the table a little past the lip along its tangent.
+    let (a, b) = (ramp_point(0.98), ramp_point(1.0));
+    let d = vec2(b.x - a.x, b.y - a.y).normalize_or_zero();
+    pts.push(vec2(LIP.x, LIP.y) + d * 1.2);
+    let deck_y = |x: f32| -> f32 {
+        // Height of the deck above a world x by scanning the polyline.
+        for w in pts.windows(2) {
+            if (w[0].x <= x && x <= w[1].x) || (w[1].x <= x && x <= w[0].x) {
+                let k = ((x - w[0].x) / (w[1].x - w[0].x)).clamp(0.0, 1.0);
+                return w[0].y + (w[1].y - w[0].y) * k;
+            }
         }
-        let a = cam.to_screen(p.x, p.y - 0.5);
-        let b = cam.to_screen(p.x, 0.0);
-        draw_line(a.x, a.y, b.x, b.y, 0.34 * s, Color::new(0.30, 0.18, 0.08, 1.0));
-        draw_line(a.x, a.y, b.x, b.y, 0.22 * s, WOOD_DARK);
-        draw_line(a.x - 0.06 * s, a.y, b.x - 0.06 * s, b.y, 0.06 * s, Color::new(1.0, 1.0, 1.0, 0.15));
-        if i + 5 < pts.len() {
-            let q = pts[i + 5];
-            let c = cam.to_screen(q.x, (q.y - 0.5) * 0.55);
-            let d2 = cam.to_screen(p.x, (p.y - 0.5) * 0.35);
-            draw_line(c.x, c.y, d2.x, d2.y, 0.22 * s, WOOD_DARK);
+        RAMP_TOP.y
+    };
+    let post = |x: f32, top: f32, bottom: f32, w: f32| {
+        let a = cam.to_screen(x, top);
+        let b = cam.to_screen(x, bottom);
+        draw_line(a.x, a.y, b.x, b.y, (w + 0.16) * s, OUTLINE);
+        draw_line(a.x, a.y, b.x, b.y, w * s, WOOD);
+        draw_line(a.x - 0.1 * w * s, a.y, b.x - 0.1 * w * s, b.y, 0.25 * w * s, WOOD_LIGHT);
+    };
+    let beam = |x0: f32, y0: f32, x1: f32, y1: f32, w: f32| {
+        let a = cam.to_screen(x0, y0);
+        let b = cam.to_screen(x1, y1);
+        draw_line(a.x, a.y, b.x, b.y, (w + 0.14) * s, OUTLINE);
+        draw_line(a.x, a.y, b.x, b.y, w * s, WOOD);
+    };
+    // Start tower: two legs, rungs and X bracing, standing on the roof.
+    let (tl, tr) = (RAMP_TOP.x - 1.9, RAMP_TOP.y - 0.3);
+    let top_y = RAMP_TOP.y - 0.35;
+    let mut y = ROOF_Y + 1.6;
+    while y < top_y - 0.8 {
+        beam(tl, y, tl + 3.6, y, 0.22);
+        beam(tl, y, tl + 3.6, (y + 2.2).min(top_y), 0.16);
+        beam(tl + 3.6, y, tl, (y + 2.2).min(top_y), 0.16);
+        y += 2.2;
+    }
+    post(tl, top_y, ROOF_Y - 0.3, 0.5);
+    post(tl + 3.6, top_y, ROOF_Y - 0.3, 0.5);
+    let _ = tr;
+    // Struts from the deck to the roof; the long ones get a knee brace.
+    for x in [-32.5, -27.0, -19.0, -13.5, -8.0, -3.2] {
+        let dy = deck_y(x);
+        if dy - ROOF_Y > 0.9 {
+            post(x, dy - 0.3, ROOF_Y - 0.3, 0.34);
+            if dy - ROOF_Y > 4.0 {
+                beam(x, ROOF_Y + 2.4, x - 2.2, dy - 0.9, 0.16);
+                beam(x, ROOF_Y + 2.4, x + 2.2, dy - 0.9 - 1.1, 0.16);
+            }
         }
+    }
+    // Under-deck truss along the inrun: a lower chord and zigzag diagonals.
+    let depth = |p: Vec2| (1.0f32).min((p.y - ROOF_Y - 0.5).max(0.0));
+    for (i, w) in pts.windows(2).enumerate() {
+        let (d0, d1) = (depth(w[0]), depth(w[1]));
+        if d0 < 0.2 { continue; }
+        beam(w[0].x, w[0].y - d0, w[1].x, w[1].y - d1, 0.2);
+        if i % 2 == 0 { beam(w[0].x, w[0].y - d0, w[1].x, w[1].y - 0.05, 0.12); } else { beam(w[0].x, w[0].y - 0.05, w[1].x, w[1].y - d1, 0.12); }
+    }
+    // The deck: ink underside, wood, a light edge, then snow with two tracks.
+    for w in pts.windows(2) {
+        let a = cam.to_screen(w[0].x, w[0].y);
+        let b = cam.to_screen(w[1].x, w[1].y);
+        draw_line(a.x, a.y, b.x, b.y, 0.9 * s, OUTLINE);
     }
     for w in pts.windows(2) {
         let a = cam.to_screen(w[0].x, w[0].y);
         let b = cam.to_screen(w[1].x, w[1].y);
-        draw_line(a.x, a.y, b.x, b.y, 0.86 * s, Color::new(0.30, 0.18, 0.08, 1.0));
-    }
-    for w in pts.windows(2) {
-        let a = cam.to_screen(w[0].x, w[0].y);
-        let b = cam.to_screen(w[1].x, w[1].y);
-        draw_line(a.x, a.y, b.x, b.y, 0.72 * s, WOOD);
+        draw_line(a.x, a.y, b.x, b.y, 0.74 * s, WOOD);
         draw_line(a.x, a.y - 0.14 * s, b.x, b.y - 0.14 * s, 0.14 * s, WOOD_LIGHT);
     }
     for w in pts.windows(2) {
-        let a = cam.to_screen(w[0].x, w[0].y + 0.28);
-        let b = cam.to_screen(w[1].x, w[1].y + 0.28);
-        draw_line(a.x, a.y, b.x, b.y, 0.3 * s, Color::new(0.85, 0.89, 0.98, 1.0));
-        draw_line(a.x, a.y - 0.06 * s, b.x, b.y - 0.06 * s, 0.16 * s, SNOW);
+        let a = cam.to_screen(w[0].x, w[0].y + 0.3);
+        let b = cam.to_screen(w[1].x, w[1].y + 0.3);
+        draw_line(a.x, a.y, b.x, b.y, 0.34 * s, Color::new(0.85, 0.89, 0.98, 1.0));
+        draw_line(a.x, a.y - 0.06 * s, b.x, b.y - 0.06 * s, 0.2 * s, SNOW);
+        // Two sled tracks pressed into the snow.
+        for off in [-0.06, 0.06] {
+            draw_line(a.x, a.y + off * s, b.x, b.y + off * s, 0.03 * s, Color::new(0.62, 0.72, 0.9, 1.0));
+        }
     }
-    // Candy-cane rail along the ramp.
+    // Candy-cane rail along the whole run, on short posts.
     for (i, w) in pts.windows(2).enumerate() {
-        let a = cam.to_screen(w[0].x, w[0].y + 0.4);
-        let b = cam.to_screen(w[1].x, w[1].y + 0.4);
+        let a = cam.to_screen(w[0].x, w[0].y + 1.1);
+        let b = cam.to_screen(w[1].x, w[1].y + 1.1);
         let c = if i % 2 == 0 { Color::new(0.92, 0.32, 0.32, 1.0) } else { Color::new(1.0, 0.97, 0.95, 1.0) };
-        draw_line(a.x, a.y, b.x, b.y, 0.09 * s, c);
+        draw_line(a.x, a.y, b.x, b.y, 0.1 * s, c);
+        if i % 4 == 0 {
+            let f = cam.to_screen(w[0].x, w[0].y + 0.3);
+            draw_line(f.x, f.y, a.x, a.y, 0.06 * s, OUTLINE);
+        }
     }
+    // Start platform behind the gate, with a rail, a red start beam and a
+    // pennant on a pole; Santa waves from here.
+    let (px0, px1, py) = (RAMP_TOP.x - 4.2, RAMP_TOP.x + 0.4, RAMP_TOP.y);
+    beam(px0, py, px1, py, 0.62);
+    let a = cam.to_screen(px0, py + 0.3);
+    let b = cam.to_screen(px1, py + 0.3);
+    draw_line(a.x, a.y, b.x, b.y, 0.3 * s, SNOW);
+    post(px0 + 0.2, py + 1.5, py, 0.12);
+    beam(px0 + 0.2, py + 1.5, px0 + 2.6, py + 1.5, 0.1);
+    post(px0 + 0.2, py + 4.4, py + 1.5, 0.1);
+    let fp = cam.to_screen(px0 + 0.2, py + 4.4);
+    let wave = (t * 3.0).sin() * 0.12 * s;
+    draw_triangle(fp, vec2(fp.x + 1.4 * s, fp.y + 0.35 * s + wave), vec2(fp.x, fp.y + 0.7 * s), Color::new(0.92, 0.32, 0.32, 1.0));
+    // Start beam: a red bar across the track the sled sits behind.
+    let g0 = cam.to_screen(RAMP_TOP.x + 0.9, RAMP_TOP.y + 0.15);
+    draw_line(g0.x, g0.y, g0.x, g0.y - 0.9 * s, 0.1 * s, OUTLINE);
+    draw_circle(g0.x, g0.y - 0.9 * s, 0.16 * s, Color::new(0.92, 0.32, 0.32, 1.0));
 
-    // Santa waving on the platform.
-    let sp_pos = cam.to_screen(RAMP_TOP.x - 4.6, RAMP_TOP.y + 0.05);
+    // Santa waving from the start platform behind the sled.
+    let sp_pos = cam.to_screen(RAMP_TOP.x - 2.4, RAMP_TOP.y + 0.05);
     let bob = (t * 2.0).sin() * 0.05 * s;
     blit_standing(&sp.santa, vec2(sp_pos.x, sp_pos.y + bob), 2.4 * s, false, WHITE);
     // Elves cheering near the landing zone.
-    for (i, (wx, tex)) in [(4.0, &sp.elf_a), (6.5, &sp.elf_b), (-22.0, &sp.elf_b)].iter().enumerate() {
+    for (i, (wx, tex)) in [(3.0, &sp.elf_a), (5.5, &sp.elf_b), (14.5, &sp.elf_b)].iter().enumerate() {
         let p = cam.to_screen(*wx, 0.0);
         let hop = ((t * 5.0 + i as f32 * 1.7).sin().max(0.0)) * 0.3 * s;
         blit_standing(tex, vec2(p.x, p.y + 0.05 * s - hop), 1.5 * s, false, WHITE);
     }
-    // A decorated tree and gifts by the tower foot.
-    let p = cam.to_screen(-24.0, 0.0);
+    // A decorated tree, gifts and a lamppost on the ground past the corner.
+    let p = cam.to_screen(10.0, 0.0);
     blit_standing(&sp.xmas_tree, vec2(p.x, p.y + 0.05 * s), 4.6 * s, false, WHITE);
-    let p = cam.to_screen(-20.5, 0.0);
+    let p = cam.to_screen(7.6, 0.0);
     blit_standing(&sp.gift_pile, vec2(p.x, p.y + 0.05 * s), 2.6 * s, false, WHITE);
-    let p = cam.to_screen(9.0, 0.0);
+    let p = cam.to_screen(12.5, 0.0);
     blit_standing(&sp.lamppost, vec2(p.x, p.y + 0.05 * s), 1.3 * s, false, WHITE);
 }
 
@@ -613,7 +834,7 @@ pub fn midground(sp: &Sprites, cam: &Cam) {
     let sh = screen_height();
     let s = cam.scale();
     let factor = 0.65;
-    let factor_y = factor * factor * 0.9;
+    let factor_y = para_y(factor);
     let base = cam.to_screen_parallax(0.0, 0.0, factor_y).y + 40.0 * cam.zoom.powf(0.4);
     if base < -60.0 || base > sh + 60.0 {
         return;
@@ -707,6 +928,11 @@ pub fn foreground(sp: &Sprites, cam: &Cam, speed: f32) {
         } else {
             let w = 1.1 * s;
             let h = w * sp.lamppost.height() / sp.lamppost.width();
+            // Lamps come on as the afternoon fades: a warm disc around the head.
+            let dusk = dusk_factor(cam);
+            if dusk > 0.0 {
+                draw_circle(p.x, p.y - h * 0.86, 2.5 * s, Color::new(1.0, 0.85, 0.5, 0.35 * dusk));
+            }
             blit_wh(&sp.lamppost, vec2(p.x, p.y - h / 2.0), w * (1.0 + shear * 1.2), h, 0.0, false, tint);
         }
     }
@@ -727,6 +953,80 @@ pub fn landing_zone(cam: &Cam, x: f32, t: f32) {
         draw_rectangle(fx - 0.05 * s, p.y - 2.2 * s, 0.1 * s, 2.2 * s, Color::new(0.35, 0.38, 0.55, 1.0));
         let wave = (t * 4.0 + side).sin() * 0.15 * s;
         draw_triangle(vec2(fx, p.y - 2.2 * s), vec2(fx + side * 1.1 * s, p.y - 1.85 * s + wave), vec2(fx, p.y - 1.5 * s), Color::new(0.9, 0.25, 0.25, 1.0));
+    }
+}
+
+/// A ranked pennant where a past flight ended: a pole, a triangular flag
+/// with the rank on it. The best flight's pennant is gold, taller, and
+/// waves slowly; the rest are ink-and-snow.
+pub fn pennant(cam: &Cam, font: &Font, x: f32, rank: usize, gold: bool, t: f32) {
+    let s = cam.scale();
+    let p = cam.to_screen(x, 0.0);
+    if p.x < -4.0 * s || p.x > screen_width() + 4.0 * s || p.y > screen_height() + s {
+        return;
+    }
+    let h = if gold { 3.5 } else { 2.2 } * s;
+    draw_rectangle(p.x - 0.06 * s, p.y - h, 0.12 * s, h, OUTLINE);
+    let wave = (t * if gold { 2.0 } else { 4.0 } + rank as f32).sin() * 0.12 * s;
+    let (fw, fh) = if gold { (1.6 * s, 0.95 * s) } else { (1.2 * s, 0.7 * s) };
+    let (x0, y0) = (p.x + 0.06 * s, p.y - h);
+    let fill = if gold { SEED } else { SNOW };
+    draw_triangle(vec2(x0, y0), vec2(x0 + fw, y0 + fh * 0.5 + wave), vec2(x0, y0 + fh), OUTLINE);
+    let k = 0.08 * s;
+    draw_triangle(vec2(x0, y0 + k), vec2(x0 + fw - 2.0 * k, y0 + fh * 0.5 + wave), vec2(x0, y0 + fh - k), fill);
+    let label = format!("{}", rank);
+    let size = if gold { 0.5 } else { 0.4 } * s;
+    let d = measure_text(&label, Some(font), size as u16, 1.0);
+    let (tx, ty) = (x0 + fw * 0.32 - d.width / 2.0, y0 + fh * 0.5 + wave * 0.4 + d.height / 2.0);
+    draw_text_ex(&label, tx, ty, TextParams { font: Some(font), font_size: size as u16, color: OUTLINE, ..Default::default() });
+}
+
+/// The aim mark: only a ring on the snow where the flight for the current
+/// power and jump would land. The dotted arc off the lip is gone; it read
+/// as clutter over the sky. Gold when the push is in the sweet spot.
+pub fn aim_arc(cam: &Cam, path: &[Vec2], sweet: bool) {
+    let s = cam.scale();
+    let sw = screen_width();
+    if let Some(last) = path.last() {
+        let p = cam.to_screen(last.x, 0.0);
+        if p.x > -2.0 * s && p.x < sw + 2.0 * s {
+            let col = if sweet { Color::new(1.0, 0.86, 0.30, 0.9) } else { Color::new(0.98, 0.98, 1.0, 0.8) };
+            draw_ellipse_lines(p.x, p.y, 0.5 * s, 0.22 * s, 0.0, 0.08 * s, Color::new(0.12, 0.14, 0.25, 0.7));
+            draw_ellipse_lines(p.x, p.y, 0.45 * s, 0.19 * s, 0.0, 0.05 * s, col);
+        }
+    }
+}
+
+/// The ghost of the best run: its path as faint dots in the pilot's scarf
+/// colour, and a gold checkered flag with that pilot's face where it ended.
+pub fn ghost_path(sp: &Sprites, cam: &Cam, path: &[(f32, f32)], idx: usize, t: f32) {
+    let s = cam.scale();
+    let (sw, sh) = (screen_width(), screen_height());
+    // Only the flag at the end marks the ghost: a trail of dots read as clutter.
+    let _ = idx;
+    if let Some((fx, _)) = path.last() {
+        let p = cam.to_screen(*fx, 0.0);
+        if p.x < -4.0 * s || p.x > sw + 4.0 * s || p.y > sh + s {
+            return;
+        }
+        let h = 2.4 * s;
+        draw_rectangle(p.x - 0.07 * s, p.y - h, 0.14 * s, h, OUTLINE);
+        let wave = (t * 3.0).sin() * 0.12 * s;
+        // Checkered flag: a 2x2 gold/ink grid, waving at the tip.
+        let (fw, fh) = (1.5 * s, 0.9 * s);
+        let (x0, y0) = (p.x + 0.07 * s, p.y - h);
+        for cy in 0..2 {
+            for cx in 0..2 {
+                let gold = (cx + cy) % 2 == 0;
+                let c = if gold { SEED } else { OUTLINE };
+                let (ax, ay) = (x0 + fw * 0.5 * cx as f32, y0 + fh * 0.5 * cy as f32);
+                let tip = if cx == 1 { wave } else { 0.0 };
+                draw_triangle(vec2(ax, ay + tip * 0.5), vec2(ax + fw * 0.5, ay + tip), vec2(ax, ay + fh * 0.5 + tip * 0.5), c);
+                draw_triangle(vec2(ax + fw * 0.5, ay + tip), vec2(ax + fw * 0.5, ay + fh * 0.5 + tip), vec2(ax, ay + fh * 0.5 + tip * 0.5), c);
+            }
+        }
+        draw_rectangle_lines(x0, y0, fw, fh, 0.06 * s, OUTLINE);
+        blit(&sp.dogs_heads[idx.min(2)][0], vec2(p.x, y0 - 0.8 * s), 1.5 * s, 0.0, false, WHITE);
     }
 }
 
@@ -794,6 +1094,8 @@ pub struct Pose {
     /// Wiggle presses left (0..12), or -1 to hide the pips.
     #[allow(dead_code)]
     pub pips: i32,
+    /// 0..1 how much of a meteor: curled into a rolling fireball.
+    pub ball: f32,
     /// Encased in ice after a cold wind.
     pub frozen: bool,
 }
@@ -857,24 +1159,43 @@ pub fn dog_echo(sp: &Sprites, p: Vec2, r: f32, idx: usize, limbs: Limbs, face: F
 
 /// The dog after a crash: head-first in the snow, sinking, then only the
 /// hind paws and tail poking out of the hole. `sink` is 0..1.
-pub fn dog_buried(sp: &Sprites, cam: &Cam, x: f32, idx: usize, sink: f32) {
+/// `size` scales the hole: 1 for an ordinary splat, up to about 2.2 for a
+/// meteor, which also scorches the rim.
+pub fn dog_buried(sp: &Sprites, cam: &Cam, x: f32, idx: usize, sink: f32, t: f32, size: f32) {
     let s = cam.scale();
     let r = PILOT_RADIUS * s;
     let w = DOG_W * r * DOG_FLY_SCALE;
-    // Hole rim on the snow.
+    // Hole rim on the snow; a meteor's is wider, with a scorched ring.
     let g = cam.to_screen(x, 0.0);
-    draw_ellipse(g.x, g.y, 1.9 * s, 0.5 * s, 0.0, Color::new(0.2, 0.18, 0.3, 0.9));
-    draw_ellipse(g.x, g.y - 0.12 * s, 1.9 * s, 0.42 * s, 0.0, Color::new(0.08, 0.06, 0.14, 1.0));
-    // Body upside down; goes down with the sink and stays with the paws up.
-    let depth = 2.6 * sink;
-    let p = cam.to_screen(x, PILOT_RADIUS + 0.4 - depth);
-    let tilt = std::f32::consts::PI;
+    if size > 1.2 {
+        let k = ((size - 1.2) / 1.0).clamp(0.0, 1.0);
+        draw_ellipse(g.x, g.y + 0.1 * s, 3.4 * s * size, 0.9 * s * size, 0.0, Color::new(0.25, 0.18, 0.15, 0.55 * k));
+        draw_ellipse(g.x, g.y + 0.05 * s, 2.6 * s * size, 0.7 * s * size, 0.0, Color::new(0.45, 0.30, 0.20, 0.6 * k));
+    }
+    draw_ellipse(g.x, g.y, 1.9 * s * size, 0.5 * s * size, 0.0, Color::new(0.2, 0.18, 0.3, 0.9));
+    draw_ellipse(g.x, g.y - 0.12 * s, 1.9 * s * size, 0.42 * s * size, 0.0, Color::new(0.08, 0.06, 0.14, 1.0));
+    // Two beats: first the dog is stuck head-first at the surface, squashed
+    // and shuddering; then it slides down into the hole and stays with the
+    // paws up. Stars orbit the tail end the whole time.
+    let stuck = (sink / 0.5).clamp(0.0, 1.0);
+    let slide = ((sink - 0.5) / 0.5).clamp(0.0, 1.0);
+    let depth = 2.6 * slide * slide * size.max(1.0);
+    let shudder = if slide <= 0.0 { (t * 38.0).sin() * 0.06 * (1.0 - stuck) } else { 0.0 };
+    let squash = 1.0 - 0.28 * (1.0 - stuck);
+    let p = cam.to_screen(x + shudder, PILOT_RADIUS + 0.4 - depth);
+    let tilt = std::f32::consts::PI + shudder * 2.0;
     let u = w / 256.0;
     let (hx, hy, _) = head_seat(Limbs::Land);
     let head = vec2(p.x + (hx * tilt.cos() + hy * tilt.sin()) * u, p.y + (-hx * tilt.sin() + hy * tilt.cos()) * u);
     ears(sp, idx, head, u, w, tilt, 0.4, WHITE);
-    blit_wh(body_tex(sp, idx, Limbs::Land), p, w, w, tilt, false, WHITE);
-    blit_wh(head_tex(sp, idx, Face::Squint), head, w, w, tilt, false, WHITE);
+    blit_wh(body_tex(sp, idx, Limbs::Land), p, w * (2.0 - squash), w * squash, tilt, false, WHITE);
+    blit_wh(head_tex(sp, idx, Face::Dizzy), head, w * (2.0 - squash), w * squash, tilt, false, WHITE);
+    // Dizzy stars circling above the hole.
+    for i in 0..3 {
+        let a = t * 4.0 + i as f32 * 2.09;
+        let c = vec2(g.x + a.cos() * 1.3 * s, g.y - 2.2 * s + a.sin() * 0.35 * s);
+        blit(&sp.sparkle, c, 0.7 * s, a * 1.5, false, Color::new(1.0, 0.9, 0.4, 0.95));
+    }
 }
 
 /// Ear angle in radians for the left ear (right is mirrored): hanging when
@@ -908,6 +1229,22 @@ pub fn dog(sp: &Sprites, p: Vec2, r: f32, idx: usize, pose: Pose) {
     let (c, s) = (tilt.cos(), tilt.sin());
     let at = |x: f32, y: f32| vec2(p.x + (x * c - y * s) * r, p.y - (x * s + y * c) * r);
 
+    if pose.ball > 0.0 {
+        // The meteor: a fireball around the curled dog, flickering, with a
+        // tail of flame streaming up behind the fall. Sized from the figure
+        // width so it wraps the whole dog.
+        let b = pose.ball;
+        let flick = 1.0 + (pose.t * 37.0).sin() * 0.12 + (pose.t * 23.0).cos() * 0.08;
+        for i in 0..6 {
+            let k = i as f32 / 5.0;
+            let tail = vec2(p.x + (pose.t * 13.0 + i as f32).sin() * 0.12 * w, p.y - (0.45 + 1.4 * k) * w * b);
+            let col = lerp(Color::new(1.0, 0.45, 0.10, 0.9 * b), Color::new(1.0, 0.85, 0.35, 0.0), k);
+            blit(&sp.puff, tail, (1.3 - 0.8 * k) * w * b * flick, k * 3.0, i % 2 == 0, col);
+        }
+        blit(&sp.puff, p, 1.7 * w * b * flick, pose.t * 2.0, false, Color::new(1.0, 0.40, 0.08, 0.85 * b));
+        blit(&sp.puff, p, 1.3 * w * b * flick, -pose.t * 3.0, true, Color::new(1.0, 0.72, 0.20, 0.9 * b));
+        blit(&sp.puff, p, 0.95 * w * b, pose.t * 4.0, false, Color::new(1.0, 0.95, 0.65, 0.9 * b));
+    }
     if pose.rocketing {
         let flick = 1.0 + (pose.t * 40.0).sin() * 0.2;
         for (k, col) in [(1.6, Color::new(1.0, 0.55, 0.15, 0.9)), (1.0, Color::new(1.0, 0.85, 0.3, 0.9))] {
@@ -922,6 +1259,9 @@ pub fn dog(sp: &Sprites, p: Vec2, r: f32, idx: usize, pose: Pose) {
         blit_wh(&sp.wings, top, 4.6 * r, 4.6 * r * 160.0 / 240.0 * (1.0 + flap), tilt, false, WHITE);
     }
 
+    // Curled up in the fireball the figure is about half size.
+    let w = w * (1.0 - 0.45 * pose.ball);
+    let r = r * (1.0 - 0.45 * pose.ball);
     // Each wiggle press hops the whole figure up and slaps it back down.
     let hop = (pose.flap * std::f32::consts::PI).sin();
     let p = vec2(p.x, p.y - hop * r * 0.35);
@@ -947,14 +1287,95 @@ pub fn dog(sp: &Sprites, p: Vec2, r: f32, idx: usize, pose: Pose) {
         2 => (pose.t * 18.0).sin() * 0.06 * if pose.flying { 1.0 } else { 0.0 },
         _ => 0.0,
     };
-    ears(sp, idx, head, u, w, tilt + hrot + breed_lean, ear_angle(&pose), WHITE);
-    blit_wh(body_tex(sp, idx, pose.limbs), p, w * sx, w * sy, tilt, false, WHITE);
-    blit_wh(head_tex(sp, idx, pose.face), head, w * sx, w * sy, tilt + hrot + breed_lean, false, WHITE);
+    // Frozen: the dog itself goes icy blue and shivers, with icicles hanging
+    // off it and frost glinting around; no block hides the character.
+    let tint = if pose.frozen { Color::new(0.70, 0.86, 1.0, 1.0) } else { WHITE };
+    let shiver = if pose.frozen { vec2((pose.t * 57.0).sin(), (pose.t * 43.0).cos()) * 0.018 * w } else { Vec2::ZERO };
+    let (p, head) = (p + shiver, head + shiver);
+    cape(p, head, w, tilt, &pose, idx);
+    ears(sp, idx, head, u, w, tilt + hrot + breed_lean, ear_angle(&pose), tint);
+    blit_wh(body_tex(sp, idx, pose.limbs), p, w * sx, w * sy, tilt, false, tint);
+    blit_wh(head_tex(sp, idx, pose.face), head, w * sx, w * sy, tilt + hrot + breed_lean, false, tint);
     if pose.frozen {
-        // An ice block around the whole dog, wobbling as it tumbles.
-        let centre = (p + head) * 0.5;
-        blit(&sp.icecube, centre, w * 1.25, tilt * 0.5 + (pose.t * 3.0).sin() * 0.05, false, Color::new(1.0, 1.0, 1.0, 0.92));
+        // Body-local axes so the icicles hang from the underside however the dog tilts.
+        let down = vec2(-tilt.sin(), tilt.cos());
+        let right = vec2(tilt.cos(), tilt.sin());
+        for k in 0..5 {
+            let along = (k as f32 - 2.0) * 0.16 * w;
+            let len = (0.08 + 0.05 * ((k * 7) % 3) as f32) * w;
+            let base = p + right * along + down * 0.40 * w * sy;
+            let half = 0.035 * w;
+            let tip = base + down * len;
+            draw_triangle(base - right * (half + 2.0) - down * 2.0, base + right * (half + 2.0) - down * 2.0, tip + down * 2.5, OUTLINE);
+            draw_triangle(base - right * half, base + right * half, tip, Color::new(0.86, 0.95, 1.0, 1.0));
+        }
+        // Frost glints twinkling around the body.
+        for k in 0..5 {
+            let a = pose.t * 1.4 + k as f32 * 1.256;
+            let c = p + vec2(a.cos() * 0.55 * w, a.sin() * 0.45 * w);
+            let tw = 0.5 + 0.5 * (pose.t * 9.0 + k as f32 * 2.0).sin();
+            blit(&sp.sparkle, c, (0.10 + 0.08 * tw) * w, a * 2.0, false, Color::new(0.85, 0.95, 1.0, 0.5 + 0.5 * tw));
+        }
+        // A little cloud of breath frost above the head.
+        blit(&sp.puff, head - vec2(0.0, 0.32 * w) + shiver, 0.28 * w * (1.0 + 0.1 * (pose.t * 6.0).sin()), 0.0, false, Color::new(0.9, 0.97, 1.0, 0.45));
     }
+    if pose.ball > 0.0 {
+        // Fire in front of the dog too, so it burns inside the ball rather
+        // than in front of a backdrop.
+        let b = pose.ball;
+        let flick = 1.0 + (pose.t * 41.0).sin() * 0.1;
+        blit(&sp.puff, p, 1.35 * w / (1.0 - 0.45 * b) * b * flick, -pose.t * 2.5, true, Color::new(1.0, 0.55, 0.12, 0.45 * b));
+        blit(&sp.puff, p, 0.9 * w / (1.0 - 0.45 * b) * b, pose.t * 3.5, false, Color::new(1.0, 0.9, 0.5, 0.35 * b));
+    }
+}
+
+/// A flying cape behind the dog: anchored at the collar, streaming against
+/// the direction of travel, flaring and rippling with speed; it hangs down
+/// while the dog sits on the sled. Drawn before the body so it stays behind.
+fn cape(p: Vec2, head: Vec2, w: f32, tilt: f32, pose: &Pose, idx: usize) {
+    let speed = pose.trail.clamp(0.0, 1.0);
+    let facing = vec2(tilt.cos(), tilt.sin());
+    let stream = if pose.flying {
+        (-facing + vec2(0.0, 0.45 * (1.0 - speed))).normalize_or_zero()
+    } else {
+        vec2(-0.35, 1.0).normalize()
+    };
+    let side = vec2(-stream.y, stream.x);
+    let collar = p + (head - p) * 0.5 - facing * 0.04 * w;
+    let len = w * if pose.flying { 0.55 + 0.55 * speed } else { 0.42 };
+    let (w0, w1) = (0.15 * w, (0.30 + 0.12 * speed) * w);
+    let flap_rate = if pose.flying { 11.0 + 9.0 * speed } else { 3.0 };
+    // Build the outline: left edge out, rippled hem, right edge back.
+    let n = 7;
+    let mut pts: Vec<Vec2> = Vec::with_capacity(2 * n + 2);
+    for i in 0..=n {
+        let k = i as f32 / n as f32;
+        let ripple = (pose.t * flap_rate - k * 5.0).sin() * 0.07 * w * k;
+        let half = w0 + (w1 - w0) * k;
+        pts.push(collar + stream * (len * k) + side * (half + ripple));
+    }
+    for i in (0..=n).rev() {
+        let k = i as f32 / n as f32;
+        let ripple = (pose.t * flap_rate - k * 5.0 + 1.3).sin() * 0.07 * w * k;
+        let half = w0 + (w1 - w0) * k;
+        pts.push(collar + stream * (len * k) - side * (half + ripple));
+    }
+    let c = collar + stream * (len * 0.5);
+    let fill = scarf_color(idx);
+    let dark = Color::new(fill.r * 0.72, fill.g * 0.6, fill.b * 0.6, 1.0);
+    // Ink outline as a slightly inflated copy, then the fill, then a shaded inner fold.
+    for i in 0..pts.len() {
+        let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+        let grow = |q: Vec2| c + (q - c) * 1.0 + (q - c).normalize_or_zero() * 2.5;
+        draw_triangle(c, grow(a), grow(b), OUTLINE);
+    }
+    for i in 0..pts.len() {
+        draw_triangle(c, pts[i], pts[(i + 1) % pts.len()], fill);
+    }
+    // A darker fold down the middle gives the cape volume.
+    let mid0 = collar + side * 0.02 * w;
+    let mid1 = collar + stream * len + side * (0.05 * w + (pose.t * flap_rate).sin() * 0.05 * w);
+    draw_triangle(mid0, mid1 + side * 0.09 * w, mid1 - side * 0.05 * w, dark);
 }
 
 /// The sled the dog rides down the ramp.
@@ -1019,11 +1440,20 @@ pub fn entity(sp: &Sprites, cam: &Cam, e: &Entity, t: f32, dog: Option<(Vec2, Ve
             blit_wh(&sp.wings, vec2(p.x, p.y + bob), 4.4 * s * grow, 4.4 * s * grow * 160.0 / 240.0 * flap, 0.0, false, tint);
         }
         EntityKind::Firework => {
+            // The rocket hangs nose-up-right with its fuse lit: a warm glow, a
+            // sputtering spark at the tail and a thin smoke trail drifting down.
             let flick = 1.0 + (t * 30.0 + e.pos.x).sin() * 0.25;
-            blit(&sp.puff, vec2(p.x - 2.0 * s, p.y), 1.6 * s * flick, 0.0, false, Color::new(1.0, 0.6, 0.2, 0.8 * a));
-            blit(&sp.puff, vec2(p.x - 2.4 * s, p.y), 1.0 * s * flick, 0.0, false, Color::new(1.0, 0.9, 0.4, 0.8 * a));
-            blit(&sp.puff, p, 5.0 * s, 0.0, false, Color::new(1.0, 0.7, 0.4, 0.2 * a));
-            blit(&sp.firework, p, 4.4 * s * grow, (t * 2.0 + e.pos.x).sin() * 0.05, false, tint);
+            let rot = -0.35 + (t * 2.0 + e.pos.x).sin() * 0.05;
+            let tail = vec2(p.x - 2.1 * s, p.y + 0.9 * s);
+            for k in 0..3 {
+                let kf = k as f32;
+                let drift = ((t * 0.8 + kf * 0.9 + e.pos.x).rem_euclid(1.0)) * 1.8 * s;
+                blit(&sp.puff, vec2(tail.x - 0.3 * s * kf, tail.y + drift), (0.6 + 0.3 * kf) * s, 0.0, false, Color::new(0.85, 0.85, 0.9, 0.25 * a * (1.0 - drift / (1.8 * s))));
+            }
+            blit(&sp.puff, p, 5.6 * s, 0.0, false, Color::new(1.0, 0.7, 0.4, 0.22 * a));
+            blit(&sp.firework, p, 4.6 * s * grow, rot, false, tint);
+            blit(&sp.sparkle, tail, 1.5 * s * flick, t * 9.0, false, Color::new(1.0, 0.95, 0.6, 0.95 * a));
+            blit(&sp.sparkle, tail, 0.8 * s * flick, -t * 12.0, false, Color::new(1.0, 1.0, 1.0, 0.9 * a));
         }
         EntityKind::Present => {
             let bob = (t * 3.0 + e.pos.x).sin() * 0.2 * s;
@@ -1160,11 +1590,13 @@ pub fn entity(sp: &Sprites, cam: &Cam, e: &Entity, t: f32, dog: Option<(Vec2, Ve
 }
 
 /// Just the hind paws of the buried dog sticking up out of the hole.
-pub fn dog_paws_up(sp: &Sprites, cam: &Cam, x: f32, idx: usize) {
+pub fn dog_paws_up(sp: &Sprites, cam: &Cam, x: f32, idx: usize, t: f32) {
     let s = cam.scale();
     let r = PILOT_RADIUS * s;
     let w = DOG_W * r * DOG_FLY_SCALE;
-    let p = cam.to_screen(x, PILOT_RADIUS + 0.4 - 2.6);
+    // Legs kick: a quick alternating wobble and bob, slowing as the dog gives up.
+    let kick = (t * 9.0).sin();
+    let p = cam.to_screen(x + kick * 0.12, PILOT_RADIUS + 0.4 - 2.6 + (t * 18.0).sin().abs() * 0.12);
     // Source rect: the lower part of the land pose (legs), drawn flipped so it points up.
     let tex = body_tex(sp, idx, Limbs::Land);
     let (tw, th) = (tex.width(), tex.height());
@@ -1177,8 +1609,8 @@ pub fn dog_paws_up(sp: &Sprites, cam: &Cam, x: f32, idx: usize) {
     draw_texture_ex(
         tex,
         p.x - w / 2.0,
-        g.y - dh + 0.2 * s,
+        g.y - dh + 0.2 * s - (t * 18.0).sin().abs() * 0.12 * s,
         WHITE,
-        DrawTextureParams { dest_size: Some(vec2(w, dh)), source: Some(src), flip_y: true, ..Default::default() },
+        DrawTextureParams { dest_size: Some(vec2(w, dh)), source: Some(src), flip_y: true, rotation: kick * 0.12, ..Default::default() },
     );
 }

@@ -1,7 +1,7 @@
 {
   "name": "calgary_xmas",
   "title": "Santa's Flight School · YYC",
-  "tower_sign": "FLIGHT SCHOOL",
+  "tower_sign": "",
   "milestones": ["CHINOOK RIDER!", "OVER THE ROCKIES!", "SPACE!", "ORBIT!"],
   "towns": ["Cochrane", "Airdrie", "Okotoks", "Canmore", "Banff", "Drumheller", "Red Deer", "Edmonton"],
   "pilots": [
@@ -25,11 +25,17 @@
     "fly_again": "space or click to fly again",
     "flap": "FLAP",
     "crash": "SPLAT!",
+    "meteor": "METEOR!",
+    "crash_meteor": "KABOOM!",
     "jump_perfect": "PERFECT JUMP!",
     "jump_good": "GOOD JUMP!",
     "jump_early": "TOO EARLY!",
     "jump_missed": "MISSED THE JUMP!",
+    "jump_late": "TOO LATE!",
     "restart": "RESTART",
-    "scoreboard": "SCOREBOARD"
+    "scoreboard": "SCOREBOARD",
+    "tip_push": "The gold zone starts at 82",
+    "tip_jump": "Press space or click when the ramp glows gold",
+    "tip_air": "Flap when you're falling, not rising"
   }
 }
