@@ -6,9 +6,7 @@ use macroquad::prelude::*;
 
 async fn load_one(base: &str, name: &str) -> Texture2D {
     let path = format!("{base}/{name}.png");
-    let t = load_texture(&path).await.unwrap_or_else(|e| panic!("missing sprite {path}: {e:?}"));
-    t.set_filter(FilterMode::Linear);
-    t
+    crate::post::load_sprite(&path).await.unwrap_or_else(|e| panic!("missing sprite {path}: {e:?}"))
 }
 
 macro_rules! tex {
@@ -30,6 +28,8 @@ pub struct Sprites {
     pub sled: Texture2D,
     pub tower: Texture2D,
     pub presents: [Texture2D; 3],
+    /// Painted pickup extras (gold and purple presents, rocket flame, lightning).
+    pub props: crate::props::PropSprites,
     pub trampoline: Texture2D,
     pub reindeer: Texture2D,
     pub wings: Texture2D,
@@ -64,6 +64,8 @@ pub struct Sprites {
     pub sparkle: Texture2D,
     pub feather: Texture2D,
     pub ring: Texture2D,
+    /// The painted UI kit (tools/gen_ui.py).
+    pub ui: crate::ui::UiKit,
     pub confetti: Texture2D,
     pub vignette: Texture2D,
     pub stormcloud: Texture2D,
@@ -90,6 +92,7 @@ impl Sprites {
             sled: tex!(base, "sled"),
             tower: tex!(base, "tower"),
             presents: [tex!(base, "present_red"), tex!(base, "present_green"), tex!(base, "present_blue")],
+            props: crate::props::PropSprites::load(base).await,
             trampoline: tex!(base, "trampoline"),
             reindeer: tex!(base, "reindeer"),
             wings: tex!(base, "wings"),
@@ -124,6 +127,7 @@ impl Sprites {
             sparkle: tex!(base, "sparkle"),
             feather: tex!(base, "feather"),
             ring: tex!(base, "ring"),
+            ui: crate::ui::UiKit::load(base).await,
             confetti: tex!(base, "confetti"),
             vignette: tex!(base, "vignette"),
             stormcloud: tex!(base, "stormcloud"),
@@ -155,6 +159,20 @@ pub fn blit_wh(tex: &Texture2D, center: Vec2, w: f32, h: f32, rot: f32, flip_x: 
     );
 }
 
+
+/// Draw standing on `foot`, squashed by `sx`/`sy` and leaning by `rot`,
+/// all about the feet, so a figure can crouch, stretch and sway in place.
+pub fn blit_foot(tex: &Texture2D, foot: Vec2, w: f32, sx: f32, sy: f32, rot: f32, flip_x: bool, tint: Color) {
+    let h = w * tex.height() / tex.width();
+    let (dw, dh) = (w * sx, h * sy);
+    draw_texture_ex(
+        tex,
+        foot.x - dw / 2.0,
+        foot.y - dh,
+        tint,
+        DrawTextureParams { dest_size: Some(vec2(dw, dh)), rotation: -rot, flip_x, pivot: Some(foot), ..Default::default() },
+    );
+}
 
 /// Draw with the sprite's bottom-centre at `foot` (things standing on the ground).
 pub fn blit_standing(tex: &Texture2D, foot: Vec2, w: f32, flip_x: bool, tint: Color) {

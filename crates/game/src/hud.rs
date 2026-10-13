@@ -1,5 +1,6 @@
-//! Screen-space UI: a paper Christmas card. Opaque cream plates with a thick
-//! ink outline and a hard offset shadow, Lilita One for every number and
+//! Screen-space UI: a painted paper Christmas card. Cream paper panels with
+//! painted depth, ribbons, wax seals, medals and stamps from the UI kit
+//! (`tools/gen_ui.py`, drawn by `ui.rs`), Lilita One for every number and
 //! shout, Fredoka for labels. Every UI colour is defined in the palette below
 //! and nowhere else.
 
@@ -8,7 +9,8 @@ use macroquad::prelude::*;
 
 use crate::draw::lerp;
 use crate::sprites::blit;
-use crate::App;
+use crate::ui::{self, Rib};
+use crate::{App, Fx};
 
 // ---------------------------------------------------------------------------
 // Palette
@@ -21,12 +23,17 @@ pub const BERRY: Color = Color::new(0.902, 0.224, 0.275, 1.0);
 pub const PINE: Color = Color::new(0.180, 0.620, 0.357, 1.0);
 pub const GOLD: Color = Color::new(0.961, 0.773, 0.259, 1.0);
 pub const ICE: Color = Color::new(0.749, 0.914, 1.0, 1.0);
-pub const SILVER: Color = Color::new(0.788, 0.812, 0.855, 1.0);
 pub const AMBER: Color = Color::new(0.941, 0.651, 0.227, 1.0);
 /// Secondary text on paper: solid slate, never ink at alpha (that goes muddy).
 pub const SLATE: Color = Color::new(0.353, 0.380, 0.471, 1.0);
-const PINE_DARK: Color = Color::new(0.11, 0.42, 0.24, 1.0);
-const PINE_LIGHT: Color = Color::new(0.36, 0.76, 0.48, 1.0);
+/// Deeper shades for outlines on coloured art (the painted style never uses
+/// one black line).
+const BERRY_DEEP: Color = Color::new(0.43, 0.05, 0.09, 1.0);
+const PINE_DEEP: Color = Color::new(0.05, 0.26, 0.15, 1.0);
+const GOLD_DEEP: Color = Color::new(0.54, 0.32, 0.05, 1.0);
+const ICE_DEEP: Color = Color::new(0.30, 0.48, 0.64, 1.0);
+const PAPER_DEEP: Color = Color::new(0.66, 0.45, 0.25, 1.0);
+const BROWN: Color = Color::new(0.29, 0.17, 0.13, 1.0);
 const SHADOW_ALPHA: f32 = 0.25;
 /// Seconds the dog sits in the snow before the results card arrives.
 pub const RESULT_HOLD: f32 = 1.6;
@@ -36,7 +43,6 @@ pub const RESULT_HOLD_CRASH: f32 = 3.0;
 pub fn result_hold(crashed: bool) -> f32 {
     if crashed { RESULT_HOLD_CRASH } else { RESULT_HOLD }
 }
-const OUTLINE_PX: f32 = 3.0;
 
 pub fn fade(c: Color, a: f32) -> Color {
     Color::new(c.r, c.g, c.b, c.a * a)
@@ -44,8 +50,7 @@ pub fn fade(c: Color, a: f32) -> Color {
 
 /// Ease-out-back: overshoots to about 1.1 then settles at 1.
 pub fn ease_out_back(k: f32) -> f32 {
-    let k = k.clamp(0.0, 1.0) - 1.0;
-    1.0 + 2.70158 * k * k * k + 1.70158 * k * k
+    ui::ease_out_back(k)
 }
 
 /// Every event shout gets one of four ribbon colours, by the hue of the
@@ -59,6 +64,21 @@ pub fn ribbon_color(c: Color) -> Color {
         BERRY
     } else {
         ICE
+    }
+}
+
+/// The painted ribbon for an event colour, and the deep shade its text is
+/// outlined in.
+fn ribbon_kind(c: Color) -> (Rib, Color) {
+    let r = ribbon_color(c);
+    if r == GOLD {
+        (Rib::Gold, GOLD_DEEP)
+    } else if r == PINE {
+        (Rib::Green, PINE_DEEP)
+    } else if r == BERRY {
+        (Rib::Red, BERRY_DEEP)
+    } else {
+        (Rib::Ice, ICE_DEEP)
     }
 }
 
@@ -118,6 +138,18 @@ pub fn number_unit(font: &Font, num: &str, unit: &str, x: f32, y: f32, size: u16
     text_scaled(font, unit, x0 + wn + gap, y, small, scale, color, Align::Left);
 }
 
+/// A painted number with its unit: deep outline, soft drop, centred on `x`.
+fn number_painted(font: &Font, num: &str, unit: &str, x: f32, y: f32, size: u16, scale: f32, fill: Color, edge: Color) {
+    let small = (size as f32 * 0.55) as u16;
+    let wn = ui::text_w(font, num, size, scale);
+    let wu = ui::text_w(font, unit, small, scale);
+    let gap = 5.0 * scale;
+    let x0 = x - (wn + gap + wu) / 2.0;
+    let t = (size as f32 * 0.06).clamp(2.0, 5.0) * scale;
+    ui::text_painted(font, num, x0 + wn / 2.0, y, size, scale, fill, edge, t, 0.0);
+    ui::text_painted(font, unit, x0 + wn + gap + wu / 2.0, y, small, scale, fill, edge, t * 0.8, 0.0);
+}
+
 // ---------------------------------------------------------------------------
 // Paper shapes
 // ---------------------------------------------------------------------------
@@ -158,52 +190,6 @@ fn tag_pts(x: f32, y: f32, w: f32, h: f32, r: f32, cut: f32) -> Vec<Vec2> {
     pts
 }
 
-/// Hard offset shadow under a plate.
-fn shadow(x: f32, y: f32, w: f32, h: f32, r: f32, cut: f32, alpha: f32) {
-    fan(&tag_pts(x, y + 4.0, w, h, r, cut), vec2(x + w / 2.0, y + h / 2.0 + 4.0), fade(INK, SHADOW_ALPHA * alpha));
-}
-
-/// A paper plate: shadow, ink outline, fill.
-pub fn plate(x: f32, y: f32, w: f32, h: f32, r: f32, fill: Color, outline: Color, alpha: f32) {
-    shadow(x, y, w, h, r, 0.0, alpha);
-    rounded(x, y, w, h, r, fade(outline, alpha));
-    let o = OUTLINE_PX;
-    rounded(x + o, y + o, w - 2.0 * o, h - 2.0 * o, (r - o).max(1.0), fade(fill, alpha));
-}
-
-/// A gift tag: paper with the top-left corner cut and a punched hole.
-/// Returns the hole centre.
-pub fn gift_tag(x: f32, y: f32, w: f32, h: f32, alpha: f32) -> Vec2 {
-    let (r, cut, o) = (10.0, 20.0, OUTLINE_PX);
-    let c = vec2(x + w / 2.0, y + h / 2.0);
-    shadow(x, y, w, h, r, cut, alpha);
-    fan(&tag_pts(x, y, w, h, r, cut), c, fade(INK, alpha));
-    fan(&tag_pts(x + o, y + o, w - 2.0 * o, h - 2.0 * o, r - o, cut - o), c, fade(PAPER, alpha));
-    let hole = vec2(x + cut + 6.0, y + cut + 6.0);
-    draw_circle(hole.x, hole.y, 7.5, fade(INK, alpha));
-    draw_circle(hole.x, hole.y, 4.5, fade(SNOW, alpha));
-    hole
-}
-
-/// One stamina pip: filled, or hollow snow when spent.
-fn pip(x: f32, y: f32, w: f32, h: f32, fill: Option<Color>, alpha: f32) {
-    rounded(x, y, w, h, 4.0, fade(INK, if fill.is_none() { 1.0 } else { alpha }));
-    rounded(x + 2.0, y + 2.0, w - 4.0, h - 4.0, 2.5, fade(fill.unwrap_or(SNOW), alpha));
-}
-
-/// A wax seal: a scalloped disc with an ink edge.
-fn seal(cx: f32, cy: f32, r: f32, color: Color, alpha: f32) {
-    draw_circle(cx, cy + 4.0, r + 1.0, fade(INK, SHADOW_ALPHA * alpha));
-    for pass in 0..2 {
-        let (rad, col) = if pass == 0 { (r + 2.5, fade(INK, alpha)) } else { (r, fade(color, alpha)) };
-        for i in 0..12 {
-            let a = i as f32 * std::f32::consts::TAU / 12.0;
-            draw_circle(cx + a.cos() * rad * 0.82, cy + a.sin() * rad * 0.82, rad * 0.3, col);
-        }
-        draw_circle(cx, cy, rad * 0.9, col);
-    }
-}
-
 /// A swallow-tailed ribbon, tilted, with an ink outline.
 pub fn ribbon(cx: f32, cy: f32, w: f32, h: f32, color: Color, tilt: f32, alpha: f32) {
     let (s, c) = (tilt.sin(), tilt.cos());
@@ -226,71 +212,6 @@ pub fn ribbon(cx: f32, cy: f32, w: f32, h: f32, color: Color, tilt: f32, alpha: 
     shape(w, h, fade(color, alpha), 0.0);
 }
 
-/// A pill button: pine with a light band on top and a dark lip below;
-/// pressed drops four pixels and loses the lip.
-fn button(r: Rect, label: &str, font: &Font, armed: bool, pressed: bool) {
-    let drop = if pressed { 4.0 } else { 0.0 };
-    let (x, y, w, h) = (r.x, r.y + drop, r.w, r.h);
-    let rad = h / 2.0;
-    let body = if armed { PINE } else { SILVER };
-    if !pressed {
-        rounded(x, y + 4.0, w, h + 2.0, rad, fade(INK, SHADOW_ALPHA));
-        rounded(x, y + 6.0, w, h, rad, INK);
-        rounded(x + OUTLINE_PX, y + 6.0, w - 2.0 * OUTLINE_PX, h - OUTLINE_PX, rad - 3.0, if armed { PINE_DARK } else { fade(INK, 0.5) });
-    }
-    rounded(x, y, w, h, rad, INK);
-    rounded(x + OUTLINE_PX, y + OUTLINE_PX, w - 2.0 * OUTLINE_PX, h - 2.0 * OUTLINE_PX, rad - 3.0, body);
-    rounded(x + 6.0, y + 5.0, w - 12.0, h * 0.4, rad - 6.0, if armed { PINE_LIGHT } else { fade(PAPER, 0.4) });
-    text_shout(font, label, x + w / 2.0, y + h / 2.0 + 9.0, 26, 1.0, PAPER, Align::Center);
-}
-
-/// A postage stamp: a coloured rectangle with a perforated (paper-dotted)
-/// edge and a label, rotated a few degrees.
-fn stamp(cx: f32, cy: f32, w: f32, h: f32, rot: f32, color: Color, label: &str, font: &Font) {
-    let (s, c) = (rot.sin(), rot.cos());
-    let at = |p: Vec2| vec2(cx + p.x * c - p.y * s, cy + p.x * s + p.y * c);
-    draw_rectangle_ex(cx, cy + 4.0, w + 8.0, h + 8.0, DrawRectangleParams { offset: vec2(0.5, 0.5), rotation: rot, color: fade(INK, SHADOW_ALPHA) });
-    draw_rectangle_ex(cx, cy, w + 8.0, h + 8.0, DrawRectangleParams { offset: vec2(0.5, 0.5), rotation: rot, color: INK });
-    draw_rectangle_ex(cx, cy, w + 2.0, h + 2.0, DrawRectangleParams { offset: vec2(0.5, 0.5), rotation: rot, color: PAPER });
-    draw_rectangle_ex(cx, cy, w - 4.0, h - 4.0, DrawRectangleParams { offset: vec2(0.5, 0.5), rotation: rot, color });
-    let step = 9.0;
-    let nx = (w / step) as i32;
-    let ny = (h / step) as i32;
-    for i in 0..=nx {
-        let px = -w / 2.0 + i as f32 * w / nx as f32;
-        for py in [-h / 2.0 - 1.0, h / 2.0 + 1.0] {
-            let p = at(vec2(px, py));
-            draw_circle(p.x, p.y, 3.0, PAPER);
-        }
-    }
-    for j in 1..ny {
-        let py = -h / 2.0 + j as f32 * h / ny as f32;
-        for px in [-w / 2.0 - 1.0, w / 2.0 + 1.0] {
-            let p = at(vec2(px, py));
-            draw_circle(p.x, p.y, 3.0, PAPER);
-        }
-    }
-    let d = measure_text(label, Some(font), 22, 1.0);
-    let o = at(vec2(-d.width / 2.0, d.height / 2.0));
-    for (dx, dy) in [(2.0, 0.0), (-2.0, 0.0), (0.0, 2.0), (0.0, -2.0)] {
-        draw_text_ex(label, o.x + dx, o.y + dy, TextParams { font: Some(font), font_size: 22, rotation: rot, color: INK, ..Default::default() });
-    }
-    draw_text_ex(label, o.x, o.y, TextParams { font: Some(font), font_size: 22, rotation: rot, color: PAPER, ..Default::default() });
-}
-
-/// Rank badge: gold, silver and ice for the podium, snow below it.
-fn rank_circle(cx: f32, cy: f32, rank: usize, font: &Font) {
-    let fill = match rank {
-        1 => GOLD,
-        2 => SILVER,
-        3 => ICE,
-        _ => SNOW,
-    };
-    draw_circle(cx, cy, 12.0, INK);
-    draw_circle(cx, cy, 9.5, fill);
-    text(font, &rank.to_string(), cx, cy + 5.0, 14, INK, Align::Center);
-}
-
 /// A value that matters: ink text on a small gold pill. Gold text never sits
 /// on paper. `y` is the text baseline.
 fn gold_pill(font: &Font, s: &str, x: f32, y: f32, size: u16, align: Align, alpha: f32) {
@@ -303,37 +224,48 @@ fn gold_pill(font: &Font, s: &str, x: f32, y: f32, size: u16, align: Align, alph
         Align::Right => x - pw + 8.0,
     };
     let py = y - cap - 5.0;
-    rounded(px - 2.0, py - 2.0, pw + 4.0, ph + 4.0, ph / 2.0 + 2.0, fade(INK, alpha));
-    rounded(px, py, pw, ph, ph / 2.0, fade(GOLD, alpha));
+    ui::rrect(px - 2.0, py - 1.0, pw + 4.0, ph + 4.0, ph / 2.0 + 2.0, fade(GOLD_DEEP, alpha));
+    ui::rrect(px, py, pw, ph, ph / 2.0, fade(GOLD, alpha));
+    ui::rrect(px + 4.0, py + 2.0, pw - 8.0, ph * 0.35, ph * 0.18, fade(WHITE, 0.45 * alpha));
     text(font, s, x, y, size, fade(INK, alpha), align);
 }
 
-/// A small pennant glyph: pole and a triangular flag, `h` tall.
-fn pennant_glyph(x: f32, y: f32, h: f32, color: Color) {
-    draw_line(x, y, x, y - h, 3.0, INK);
-    draw_triangle(vec2(x + 1.0, y - h), vec2(x + h * 0.7 + 1.0, y - h * 0.72), vec2(x + 1.0, y - h * 0.44), INK);
-    draw_triangle(vec2(x + 2.0, y - h + 3.0), vec2(x + h * 0.7 - 4.0, y - h * 0.72), vec2(x + 2.0, y - h * 0.44 - 3.0), color);
+/// Per-pilot portrait colours: (light, deep) for the medallion disc.
+fn pilot_colors(i: usize) -> (Color, Color) {
+    match i {
+        0 => (Color::new(1.0, 0.55, 0.50, 1.0), Color::new(0.78, 0.17, 0.22, 1.0)),
+        1 => (Color::new(0.72, 0.88, 1.0, 1.0), Color::new(0.30, 0.52, 0.78, 1.0)),
+        _ => (Color::new(0.60, 0.90, 0.62, 1.0), Color::new(0.14, 0.52, 0.30, 1.0)),
+    }
 }
 
-/// Upper half-disc with a flat base strip, for the power dial.
-fn half_disc(cx: f32, cy: f32, rad: f32, base: f32, col: Color) {
-    let n = 40;
-    for i in 0..n {
-        let a0 = std::f32::consts::PI * i as f32 / n as f32;
-        let a1 = std::f32::consts::PI * (i + 1) as f32 / n as f32;
-        draw_triangle(vec2(cx, cy), vec2(cx - a0.cos() * rad, cy - a0.sin() * rad), vec2(cx - a1.cos() * rad, cy - a1.sin() * rad), col);
-    }
-    draw_rectangle(cx - rad, cy, 2.0 * rad, base, col);
+/// A round gold-rimmed portrait with the pilot standing out of the frame.
+fn medallion(app: &App, pilot: usize, c: Vec2, r: f32, dog_w: f32, dim: bool) {
+    let (light, deep) = pilot_colors(pilot);
+    draw_circle(c.x, c.y + 4.0, r + 6.0, Color::new(0.07, 0.09, 0.2, 0.3));
+    draw_circle(c.x, c.y, r + 6.0, GOLD_DEEP);
+    draw_circle(c.x, c.y, r + 4.0, GOLD);
+    draw_circle(c.x, c.y - 1.5, r + 2.5, Color::new(1.0, 0.94, 0.62, 1.0));
+    draw_circle(c.x, c.y + 0.5, r + 1.5, GOLD);
+    draw_circle(c.x, c.y, r, deep);
+    draw_circle(c.x - r * 0.1, c.y - r * 0.14, r * 0.82, lerp(deep, light, 0.6));
+    draw_circle(c.x - r * 0.18, c.y - r * 0.26, r * 0.55, light);
+    let tint = if dim { Color::new(0.82, 0.82, 0.86, 1.0) } else { WHITE };
+    // The dog sprite's art sits right of centre: nudge it back.
+    ui::spr(&app.sprites.dogs[pilot.min(2)], c + vec2(-dog_w * 0.05, -dog_w * 0.02), dog_w, 0.0, tint);
 }
 
 // ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
 
+const CARD_W: f32 = 256.0;
+const CARD_H: f32 = 112.0;
+
 fn picker_cards() -> [Rect; 3] {
-    let (w, h, gap) = (208.0, 74.0, 12.0);
-    let x = screen_width() - w - 16.0;
-    [0, 1, 2].map(|i| Rect::new(x, 104.0 + i as f32 * (h + gap), w, h))
+    let gap = 12.0;
+    let x = screen_width() - CARD_W - 18.0;
+    [0, 1, 2].map(|i| Rect::new(x, 74.0 + i as f32 * (CARD_H + gap), CARD_W, CARD_H))
 }
 
 pub fn picker_hit(p: Vec2) -> Option<usize> {
@@ -343,16 +275,16 @@ pub fn picker_hit(p: Vec2) -> Option<usize> {
 /// The results postcard, centred.
 fn results_rect() -> Rect {
     let (sw, sh) = (screen_width(), screen_height());
-    let (w, h) = (660.0, 484.0);
-    Rect::new((sw - w) / 2.0, (sh - h) / 2.0, w, h)
+    let (w, h) = (784.0, 468.0);
+    Rect::new((sw - w) / 2.0, (sh - h) / 2.0 + 14.0, w, h)
 }
 
 /// Where the Restart button sits on the results card (for hit-testing).
 pub fn restart_button_rect() -> Rect {
     let r = results_rect();
-    let (w, h) = (220.0, 50.0);
-    let cx = r.x + 330.0 + 150.0;
-    Rect::new(cx - w / 2.0, r.y + r.h - h - 34.0, w, h)
+    let (w, h) = (264.0, 64.0);
+    let cx = r.x + 404.0 + 176.0;
+    Rect::new(cx - w / 2.0, r.y + r.h - h - 42.0, w, h)
 }
 
 // ---------------------------------------------------------------------------
@@ -363,6 +295,42 @@ pub fn render(app: &App) {
     let g = &app.game;
     let sw = screen_width();
     let sh = screen_height();
+    let now = get_time();
+    let tag = match g.phase {
+        Phase::AimPower { .. } => 0,
+        Phase::Sliding { .. } => 1,
+        Phase::Flying => 2,
+        Phase::Landed => 3,
+    };
+    let combo = app.combo_now();
+    let (since, pilot_since) = ui::with_state(|s| {
+        if s.phase != tag {
+            s.phase = tag;
+            s.phase_at = now;
+        }
+        if s.pilot != app.pilot_idx {
+            s.pilot = app.pilot_idx;
+            s.pilot_at = now;
+        }
+        if combo >= 2 && combo != s.combo {
+            s.combo = combo;
+            s.combo_at = now;
+        } else if combo < 2 && s.combo >= 2 {
+            if s.combo_gone_at < s.combo_at {
+                s.combo_gone_at = now;
+            } else if now - s.combo_gone_at > 0.4 {
+                s.combo = 0;
+            }
+        }
+        if g.presents != s.presents {
+            s.presents = g.presents;
+            s.presents_at = now;
+        }
+        if tag != 2 {
+            s.slots.clear();
+        }
+        ((now - s.phase_at) as f32, (now - s.pilot_at) as f32)
+    });
     let aiming = matches!(g.phase, Phase::AimPower { .. } | Phase::Sliding { .. });
     // The flight HUD stays up through the quiet hold after landing.
     let holding = g.phase == Phase::Landed && (app.landed_for) < result_hold(g.crashed);
@@ -371,18 +339,27 @@ pub fn render(app: &App) {
     }
     match g.phase {
         Phase::AimPower { meter } => {
-            picker(app);
-            power_dial(app, sw / 2.0, sh - 52.0, Game::meter_value(meter), true);
-            target_plank(app, sw / 2.0 - 148.0, sh - 84.0);
-            today_plank(app, sw / 2.0 + 148.0, sh - 84.0);
+            title_logo(app, ui::ease_out_back((since - 0.05) / 0.5), 0.0);
+            picker(app, since, pilot_since, 0.0);
+            let rise = 1.0 - ui::ease_out_cubic((since - 0.1) / 0.45);
+            let dy = 170.0 * rise;
+            power_dial(app, sw / 2.0, sh - 52.0 + dy, Game::meter_value(meter), true);
+            target_plank(app, sw / 2.0 - 152.0, sh - 86.0 + dy * 1.2);
+            today_plank(app, sw / 2.0 + 152.0, sh - 86.0 + dy * 1.2);
             if !app.taught(crate::TEACH_PUSH) {
                 let hint = "space or click to lock the push";
-                let d = measure_text(hint, Some(&app.font), 13, 1.0);
-                plate(sw / 2.0 - d.width / 2.0 - 12.0, sh - 28.0, d.width + 24.0, 24.0, 8.0, PAPER, INK, 1.0);
-                text(&app.font, hint, sw / 2.0, sh - 11.0, 13, INK, Align::Center);
+                let w = ui::text_w(&app.font, hint, 14, 1.0) + 28.0;
+                ui::chip(&app.sprites.ui.chip_dark, Rect::new(sw / 2.0 - w / 2.0, sh - 27.0 + dy, w, 22.0), 0.45, WHITE);
+                text(&app.font, hint, sw / 2.0, sh - 11.0 + dy, 14, PAPER, Align::Center);
             }
         }
         Phase::Sliding { power, t, jump } => {
+            // The title and the picker leave as the sled goes.
+            let out = ui::ease_in_cubic(since / 0.4);
+            if out < 1.0 {
+                title_logo(app, 1.0, out);
+                picker(app, 10.0, 10.0, out);
+            }
             power_dial(app, sw / 2.0, sh - 52.0, power, false);
             if jump.is_none() {
                 jump_timer(app, t);
@@ -395,6 +372,37 @@ pub fn render(app: &App) {
     teach_prompts(app);
 }
 
+/// The game logo, top centre over the sky: pops in with the title, bobs
+/// gently, and flies off upwards (`out` 0..1) when the sled goes.
+fn title_logo(app: &App, enter: f32, out: f32) {
+    if enter <= 0.0 {
+        return;
+    }
+    let kit = &app.sprites.ui;
+    let sw = screen_width();
+    let t = get_time() as f32;
+    let right = picker_cards()[0].x - 16.0;
+    let w = (right - 250.0).clamp(300.0, 470.0);
+    let cx = (sw / 2.0).min(right - w / 2.0 + 10.0);
+    let h = w * kit.logo.height() / kit.logo.width();
+    let bob = (t * 1.6).sin() * 3.0;
+    let cy = 8.0 + h / 2.0 + bob - out * (h + 60.0);
+    let scale = enter.max(0.0);
+    let a = 1.0 - out;
+    ui::spr(&kit.logo, vec2(cx, cy), w * scale, (t * 1.1).sin() * 0.012, ui::tint(a));
+    // A glint that sweeps across the letters every few seconds.
+    let cyc = (t * 0.35).fract();
+    if cyc < 0.25 && scale >= 1.0 {
+        let k = cyc / 0.25;
+        let gx = cx - w * 0.42 + w * 0.84 * k;
+        let gy = cy + h * 0.2;
+        let r = 10.0 + 6.0 * (k * std::f32::consts::PI).sin();
+        draw_circle(gx, gy, r * 1.8, Color::new(1.0, 1.0, 0.9, 0.18 * a));
+        draw_line(gx - r * 1.6, gy, gx + r * 1.6, gy, 2.5, Color::new(1.0, 1.0, 1.0, 0.85 * a));
+        draw_line(gx, gy - r * 1.6, gx, gy + r * 1.6, 2.5, Color::new(1.0, 1.0, 1.0, 0.85 * a));
+    }
+}
+
 /// One rule at a time, at the moment it matters, never again once used:
 /// the second press at the lip, the flap, and (after a few flights) the stomp.
 fn teach_prompts(app: &App) {
@@ -405,137 +413,276 @@ fn teach_prompts(app: &App) {
     let big = &app.display;
     let t = get_time() as f32;
     let pulse = 1.0 + 0.04 * (1.0 + (t * 6.0).sin());
-    match g.phase {
-        Phase::Flying => {
-            let hp = app.cam.to_screen(g.pos.x, g.pos.y);
-            let r = PILOT_RADIUS * app.cam.scale();
-            let y = (hp.y + r * 3.6).min(screen_height() - 40.0);
-            let x = hp.x.clamp(140.0, screen_width() - 140.0);
-            if g.botched {
-                // The fall after a missed press: the banner says MISSED THE
-                // JUMP; this line under it says exactly what was missing.
-                text_shout(big, "PRESS SPACE OR CLICK AT THE LIP", screen_width() / 2.0, 236.0, 20, pulse, PAPER, Align::Center);
-            } else if g.flaps == 0 && g.flight_time > 0.6 && g.flight_time < 4.0 && !app.taught(crate::TEACH_FLAP) {
-                text_shout(big, "PRESS TO FLAP", x, y, 26, pulse, PAPER, Align::Center);
-            } else if app.stomp_teachable() && g.vel.y < 0.0 && g.pos.y < PILOT_RADIUS + STOMP_REACH + 4.0 && g.pos.y > PILOT_RADIUS + 0.5 {
-                text_shout(big, "PRESS TO STOMP", x, y, 26, pulse, PAPER, Align::Center);
-            }
+    if let Phase::Flying = g.phase {
+        let hp = app.cam.to_screen(g.pos.x, g.pos.y);
+        let r = PILOT_RADIUS * app.cam.scale();
+        let y = (hp.y + r * 4.3).min(screen_height() - 40.0);
+        let x = hp.x.clamp(140.0, screen_width() - 140.0);
+        if g.botched {
+            // The fall after a missed press: the banner says MISSED THE
+            // JUMP; this line under it says exactly what was missing.
+            text_shout(big, "PRESS SPACE OR CLICK AT THE LIP", screen_width() / 2.0, 236.0, 20, pulse, PAPER, Align::Center);
+        } else if g.flaps == 0 && g.flight_time > 0.6 && g.flight_time < 4.0 && !app.taught(crate::TEACH_FLAP) {
+            key_prompt(app, x, y, &format!("TO {}", app.pack.labels.flap), pulse);
+        } else if app.stomp_teachable() && g.vel.y < 0.0 && g.pos.y < PILOT_RADIUS + STOMP_REACH + 4.0 && g.pos.y > PILOT_RADIUS + 0.5 {
+            key_prompt(app, x, y, "TO STOMP", pulse);
         }
-        _ => {}
     }
 }
 
-/// Distance gift tag, presents seal and the height ruler.
+/// A paper plate reading [SPACE][mouse] WORD, centred on (x, y), with a
+/// small tail pointing up at the dog.
+fn key_prompt(app: &App, x: f32, y: f32, word: &str, k: f32) {
+    let (font, big) = (&app.font, &app.display);
+    let caps_w = 62.0 + 8.0 + 18.0;
+    let tw = ui::text_w(big, word, 22, 1.0);
+    let w = (caps_w + 14.0 + tw + 36.0) * k;
+    let h = 46.0 * k;
+    let (px, py) = (x - w / 2.0, y - h / 2.0);
+    ui::panel(&app.sprites.ui.panel, Rect::new(px, py, w, h), 0.42, WHITE);
+    draw_triangle(vec2(x - 9.0, py + 1.0), vec2(x + 9.0, py + 1.0), vec2(x, py - 9.0), PAPER_DEEP);
+    draw_triangle(vec2(x - 6.0, py + 3.0), vec2(x + 6.0, py + 3.0), vec2(x, py - 5.0), PAPER);
+    key_caps(font, px + 18.0 * k + caps_w * k / 2.0, py + h / 2.0, k);
+    text_scaled(big, word, px + (18.0 + caps_w + 14.0) * k, py + h / 2.0 + 8.0 * k, 22, k, INK, Align::Left);
+}
+
+/// Distance tag, presents seal, combo burst and the height ruler.
 fn flight_hud(app: &App) {
     let g = &app.game;
-    let (font, big) = (&app.font, &app.display);
+    let big = &app.display;
+    let kit = &app.sprites.ui;
     let sw = screen_width();
+    let now = get_time();
     let flying = g.phase == Phase::Flying;
-    // Entry: the tag drops in over 140 ms after the lip. Paper is opaque:
-    // plates only ease to 90% while flying.
-    let enter = if flying { ease_out_back(g.flight_time / 0.14) } else { 1.0 };
-    let alpha = if flying { 0.9 + 0.1 * (1.0 - (g.flight_time / 0.5).min(1.0)) } else { 1.0 };
-    let (x, w, h) = (14.0, 300.0, if flying { 84.0 } else { 60.0 });
-    let y = 14.0 - 30.0 * (1.0 - enter);
-    gift_tag(x, y, w, h, alpha);
+    // Entry: the panel drops in over 300 ms after the lip with an overshoot.
+    let enter = if flying { ease_out_back(g.flight_time / 0.3) } else { 1.0 };
+    let (x, w, h) = (14.0, 300.0, if flying { 86.0 } else { 58.0 });
+    let y = 14.0 - 110.0 * (1.0 - enter);
+    ui::panel(&kit.panel, Rect::new(x, y, w, h), 0.5, WHITE);
+    ui::spr(&kit.ic_flag, vec2(x + 30.0, y + 30.0), 40.0, 0.0, WHITE);
     let dp = 1.0 + 0.15 * (app.dist_pulse * std::f32::consts::PI).sin().max(0.0);
-    number_unit(big, &format!("{:.1}", g.distance()), "m", x + 46.0, y + 44.0, 38, dp, fade(INK, alpha), Align::Left);
-    rank_line(app, x + w - 14.0, y + 26.0, alpha);
+    number_unit(big, &format!("{:.1}", g.distance()), "m", x + 56.0, y + 45.0, 40, dp, INK, Align::Left);
+    rank_line(app, x + w - 14.0, y + 26.0, 1.0);
     if flying {
-        let left = ((g.stamina / hamsters_core::FLAP_COST).floor() as i32).clamp(0, 12);
-        let blink = (get_time() as f32 * 6.0 * std::f32::consts::TAU).sin() > 0.0;
+        // FLAP: a painted segmented tube, eased so a flap drains visibly.
+        let target = g.stamina.max(0.0);
+        let shown = ui::with_state(|s| {
+            s.stamina += (target - s.stamina) * 0.25;
+            s.stamina
+        });
+        let fy = y + 66.0;
+        ui::spr(&kit.ic_ear, vec2(x + 28.0, fy), 28.0, (now as f32 * 9.0).sin() * 0.08 * (app.flap_anim.min(1.0)), WHITE);
+        text(big, &app.pack.labels.flap, x + 46.0, fy + 7.0, 18, INK, Align::Left);
+        let left = ((target / hamsters_core::FLAP_COST).floor() as i32).clamp(0, 12);
+        let blink = (now as f32 * 6.0 * std::f32::consts::TAU).sin() > 0.0;
+        let col = if left < 3 {
+            if blink { BERRY } else { Color::new(1.0, 0.6, 0.6, 1.0) }
+        } else if left < 6 {
+            AMBER
+        } else {
+            PINE
+        };
+        let (bx, bw, bh) = (x + 98.0, w - 116.0, 16.0);
+        ui::rrect(bx - 3.0, fy - bh / 2.0 - 3.0, bw + 6.0, bh + 6.0, bh / 2.0 + 3.0, BROWN);
+        ui::rrect(bx, fy - bh / 2.0, bw, bh, bh / 2.0, Color::new(0.42, 0.33, 0.30, 1.0));
+        let frac = (shown / (12.0 * hamsters_core::FLAP_COST)).clamp(0.0, 1.0);
+        let seg = bw / 12.0;
         for i in 0..12 {
-            let fill = if i < left {
-                Some(if left < 3 {
-                    if blink { BERRY } else { PAPER }
-                } else if left < 6 {
-                    AMBER
-                } else {
-                    PINE
-                })
-            } else {
-                None
-            };
-            pip(x + 46.0 + i as f32 * 14.0, y + 56.0, 11.0, 17.0, fill, alpha);
+            let k = ((frac * 12.0) - i as f32).clamp(0.0, 1.0);
+            if k <= 0.0 {
+                continue;
+            }
+            let sx = bx + i as f32 * seg + 1.0;
+            let sw_ = (seg - 2.0) * k;
+            ui::rrect(sx, fy - bh / 2.0 + 1.0, sw_, bh - 2.0, 4.0, ui::shade(col, 0.75));
+            ui::rrect(sx, fy - bh / 2.0 + 1.0, sw_, bh * 0.62, 4.0, col);
+            ui::rrect(sx + 2.0, fy - bh / 2.0 + 3.0, (sw_ - 4.0).max(0.0), 3.0, 1.5, Color::new(1.0, 1.0, 1.0, 0.55));
         }
-        streak_line(app, x + 46.0, y + h + 18.0);
+        streak_line(app, x + 46.0, y + h + 22.0);
     }
-    // Presents: wax seal with the count on a small tag beside it.
-    let pulse = 1.0 + 0.35 * (app.counter_pulse * std::f32::consts::PI).sin().max(0.0);
-    let (cx, cy) = (sw / 2.0 - 44.0, 38.0 - 30.0 * (1.0 - enter));
-    plate(cx + 14.0, cy - 20.0, 78.0, 40.0, 8.0, PAPER, INK, alpha);
-    seal(cx, cy, 22.0 * pulse, PINE, alpha);
-    blit(&app.sprites.presents[0], vec2(cx, cy), 26.0 * pulse, 0.1, false, fade(WHITE, alpha));
-    text_scaled(big, &g.presents.to_string(), cx + 52.0, cy + 10.0, 28, pulse, fade(INK, alpha), Align::Center);
-    let _ = font;
+    // Presents: a green wax seal with the gift, the count on a paper chip.
+    let (pulse_t, combo, combo_at, gone_at) = ui::with_state(|s| ((now - s.presents_at) as f32, s.combo, s.combo_at, s.combo_gone_at));
+    let pulse = 1.0 + 0.3 * (1.0 - (pulse_t / 0.25).clamp(0.0, 1.0)) * (pulse_t / 0.25 * std::f32::consts::PI).sin().abs();
+    let (cx, cy) = (sw / 2.0 - 30.0, 42.0 - 110.0 * (1.0 - enter));
+    ui::chip(&kit.chip, Rect::new(cx + 6.0, cy - 21.0, 88.0, 42.0), 0.5, WHITE);
+    ui::spr(&kit.seal_green, vec2(cx, cy), 64.0 * pulse, 0.0, WHITE);
+    blit(&app.sprites.presents[0], vec2(cx, cy - 1.0), 32.0 * pulse, 0.1, false, WHITE);
+    text_scaled(big, &g.presents.to_string(), cx + 58.0, cy + 11.0, 30, pulse, INK, Align::Center);
+    // Combo: a gold burst that punches on every link and fades after the chain.
+    if combo >= 2 {
+        let age = (now - combo_at) as f32;
+        let fade_k = if gone_at > combo_at { 1.0 - ((now - gone_at) as f32 / 0.35).clamp(0.0, 1.0) } else { 1.0 };
+        let pop = ui::ease_out_elastic(age / 0.45) * (0.85 + 0.15 * fade_k);
+        let heat = ((combo as f32 - 2.0) / 6.0).clamp(0.0, 1.0);
+        let bx = cx + 138.0;
+        let size = (64.0 + 10.0 * heat) * pop;
+        let spin = now as f32 * 1.2;
+        ui::spr(&kit.burst, vec2(bx, cy), size, spin, ui::tint(fade_k));
+        ui::text_painted(big, &format!("x{}", combo), bx, cy + 10.0, 30, pop.max(0.01), fade(PAPER, fade_k), fade(Color::new(0.6, 0.22, 0.04, 1.0), fade_k), 3.0, -0.08);
+    }
     if flying {
-        height_ruler(app, alpha);
+        height_ruler(app);
     }
 }
 
-/// A vertical ruler on the right edge with the milestone heights on paper
-/// chips, and a paper arrow sliding along it. Hidden below 60 m.
-fn height_ruler(app: &App, alpha: f32) {
+/// A painted rail on the right edge with the milestone heights on paper
+/// chips and a paper arrow tag sliding along it. Hidden below 60 m.
+fn height_ruler(app: &App) {
     let alt = app.game.altitude();
     let show = ((alt - 50.0) / 10.0).clamp(0.0, 1.0);
     if show <= 0.0 {
         return;
     }
-    let a = alpha * show;
-    let (font, big) = (&app.font, &app.display);
+    let kit = &app.sprites.ui;
+    let big = &app.display;
     let sw = screen_width();
     let sh = screen_height();
-    let x = sw - 26.0 + 30.0 * (1.0 - show);
-    let (top, bottom) = (140.0, sh - 96.0);
+    let x = sw - 26.0 + 40.0 * (1.0 - ui::ease_out_cubic(show));
+    let (top, bottom) = (150.0, sh - 96.0);
     let k = |h: f32| (h / 720.0).clamp(0.0, 1.0).sqrt();
     let y_at = |h: f32| bottom - k(h) * (bottom - top);
-    draw_line(x, top, x, bottom, 4.0, fade(INK, a));
+    ui::rrect(x - 6.0, top - 6.0, 12.0, bottom - top + 12.0, 6.0, BROWN);
+    ui::rrect(x - 3.5, top - 3.5, 7.0, bottom - top + 7.0, 3.5, ICE);
+    ui::rrect(x - 3.5, y_at(alt), 7.0, bottom - y_at(alt) + 3.5, 3.5, PINE);
+    ui::spr(&kit.ic_alt, vec2(x - 4.0, top - 26.0), 34.0, 0.0, WHITE);
     let arrow_y = y_at(alt);
     for (h, _) in hamsters_core::MILESTONES.iter() {
         let y = y_at(*h);
-        draw_line(x - 10.0, y, x + 6.0, y, 3.0, fade(INK, a));
-        // Milestone heights on small paper chips so they read on any sky;
-        // a chip steps aside while the altitude arrow covers it.
+        draw_line(x - 10.0, y, x + 6.0, y, 3.0, BROWN);
         if (y - arrow_y).abs() < 26.0 {
             continue;
         }
-        let (cw, ch) = (36.0, 18.0);
-        rounded(x - 12.0 - cw, y - ch / 2.0, cw, ch, 4.0, fade(INK, a));
-        rounded(x - 10.0 - cw, y - ch / 2.0 + 2.0, cw - 4.0, ch - 4.0, 2.5, fade(PAPER, a));
-        text(font, &format!("{:.0}", h), x - 12.0 - cw / 2.0, y + 5.0, 13, fade(INK, a), Align::Center);
+        let (cw, ch) = (38.0, 18.0);
+        ui::chip(&kit.chip, Rect::new(x - 14.0 - cw, y - ch / 2.0, cw, ch), 0.3, WHITE);
+        text(big, &format!("{:.0}", h), x - 14.0 - cw / 2.0, y + 5.0, 13, INK, Align::Center);
     }
     let y = arrow_y;
-    let (w, h) = (66.0, 28.0);
-    let tx = x - 22.0 - w;
-    plate(tx, y - h / 2.0, w, h, 8.0, PAPER, INK, a);
-    draw_triangle(vec2(tx + w - 2.0, y - 9.0), vec2(tx + w - 2.0, y + 9.0), vec2(tx + w + 11.0, y), fade(INK, a));
-    draw_triangle(vec2(tx + w - 2.0, y - 4.0), vec2(tx + w - 2.0, y + 4.0), vec2(tx + w + 5.0, y), fade(PAPER, a));
-    number_unit(big, &format!("{:.0}", alt), "m", tx + w / 2.0 - 2.0, y + 7.0, 19, 1.0, fade(INK, a), Align::Center);
+    let (w, h) = (70.0, 30.0);
+    let tx = x - 24.0 - w;
+    draw_triangle(vec2(tx + w - 2.0, y - 11.0), vec2(tx + w - 2.0, y + 11.0), vec2(tx + w + 14.0, y), GOLD_DEEP);
+    draw_triangle(vec2(tx + w - 2.0, y - 7.0), vec2(tx + w - 2.0, y + 7.0), vec2(tx + w + 8.0, y), GOLD);
+    ui::chip(&kit.chip, Rect::new(tx, y - h / 2.0, w, h), 0.4, Color::new(1.0, 0.93, 0.7, 1.0));
+    number_unit(big, &format!("{:.0}", alt), "m", tx + w / 2.0 - 2.0, y + 8.0, 21, 1.0, INK, Align::Center);
 }
 
-/// Active boosts, bottom-left: an icon on a small tag with a draining bar.
+/// Active boosts, bottom-left: an icon on a paper chip with a draining bar.
 fn boost_bars(app: &App) {
     let g = &app.game;
     let sh = screen_height();
-    let mut by = sh - 40.0;
+    let kit = &app.sprites.ui;
+    let mut by = sh - 42.0;
     for (tex, frac, col) in [(&app.sprites.wings, g.glide / (3.5 * g.pilot.glide_bonus), ICE), (&app.sprites.firework, g.rocket / 1.2, AMBER)] {
         if frac <= 0.0 {
             continue;
         }
         let frac = frac.clamp(0.0, 1.0);
-        plate(16.0, by - 18.0, 176.0, 36.0, 8.0, PAPER, INK, 0.85);
-        blit(tex, vec2(40.0, by), 34.0, 0.0, false, WHITE);
-        rounded(62.0, by - 7.0, 116.0, 14.0, 5.0, INK);
-        rounded(64.0, by - 5.0, (112.0 * frac).max(6.0), 10.0, 3.5, col);
-        by -= 44.0;
+        ui::chip(&kit.chip, Rect::new(16.0, by - 19.0, 184.0, 38.0), 0.5, WHITE);
+        blit(tex, vec2(42.0, by), 38.0, 0.0, false, WHITE);
+        ui::bar(66.0, by - 6.0, 118.0, 12.0, frac, col, Color::new(0.42, 0.33, 0.30, 1.0), BROWN);
+        by -= 48.0;
     }
 }
 
-/// The results postcard: stamp header, portrait, distance, report card,
-/// ruled scoreboard and the restart button.
+/// Event text: banners on a painted ribbon in whichever slot is clear of the
+/// dog, the rank stamp on its pennant. Combo counts live in the HUD burst.
+/// Returns true when the effect was drawn here (main.rs then skips its own).
+pub fn draw_fx(app: &App, f: &Fx, hp: Vec2, r: f32) -> bool {
+    let k = f.age / f.life;
+    let big = &app.display;
+    let kit = &app.sprites.ui;
+    let (sw, sh) = (screen_width(), screen_height());
+    let zap = !f.banner && f.text == app.pack.labels.stormcloud;
+    if f.banner || zap {
+        if f.text.is_empty() {
+            return true;
+        }
+        // Two slots: under the top HUD, or low over the street. Pick the one
+        // farther from the dog when the banner first shows, and keep it.
+        let key = (f.text.clone(), f.life.to_bits());
+        let top_slot = 168.0;
+        let low_slot = sh - 118.0;
+        // The clear slot is re-checked every frame (the camera keeps moving
+        // after a teleport or a dive); the ribbon glides to it if it changes.
+        let dog_top = hp.y - r * 2.6;
+        let dog_bot = hp.y + r * 2.6;
+        let clear = |y: f32| (y + 44.0) < dog_top || (y - 44.0) > dog_bot;
+        let target = if clear(top_slot) {
+            top_slot
+        } else if clear(low_slot) {
+            low_slot
+        } else if (hp.y - top_slot).abs() > (hp.y - low_slot).abs() {
+            top_slot
+        } else {
+            low_slot
+        };
+        let cy = ui::with_state(|s| {
+            if let Some(e) = s.slots.iter_mut().find(|e| e.0 == key.0 && e.1 == key.1) {
+                e.2 += (target - e.2) * 0.18;
+                return e.2;
+            }
+            s.slots.push((key.0.clone(), key.1, target));
+            if s.slots.len() > 8 {
+                s.slots.remove(0);
+            }
+            target
+        });
+        let slide = ui::ease_out_back(f.age / 0.22);
+        let out = ((k - 0.72) / 0.28).clamp(0.0, 1.0);
+        let a = 1.0 - out * out;
+        let size = if zap { 52 } else { 46 };
+        let tw = ui::text_w(big, &f.text, size, 1.0);
+        let (bw, bh) = (tw + 70.0, 62.0);
+        // In from the left with an overshoot, out to the right, so a banner
+        // that follows never sits on top of this one.
+        let cx = -bw + (sw / 2.0 + bw) * slide + (sw / 2.0 + bw) * ui::ease_in_cubic(out);
+        let cy = cy - 10.0 * out;
+        let tilt = -2.5f32.to_radians();
+        let (rib, edge) = if zap { (Rib::Red, BERRY_DEEP) } else { ribbon_kind(f.color) };
+        let punch = 1.0 + 0.12 * (1.0 - (f.age / 0.3).clamp(0.0, 1.0));
+        ui::ribbon(kit.ribbon(rib), vec2(cx, cy), bw * punch, bh * punch, tilt, ui::tint(a));
+        let (fill, edge) = if rib == Rib::Ice { (INK, PAPER) } else if rib == Rib::Gold { (PAPER, edge) } else { (PAPER, edge) };
+        ui::text_painted(big, &f.text, cx, cy + size as f32 * 0.36 * punch, size, punch, fade(fill, a), fade(edge, a), 3.5, tilt);
+        // Sparkles at the ribbon ends for the gold ones.
+        if rib == Rib::Gold && a > 0.5 {
+            let t = get_time() as f32;
+            for i in 0..4 {
+                let side = if i % 2 == 0 { -1.0 } else { 1.0 };
+                let ph = (t * 3.0 + i as f32 * 1.3).sin();
+                let px = cx + side * (bw / 2.0 + 30.0 + 10.0 * i as f32);
+                let py = cy - 24.0 + 18.0 * i as f32 * 0.6 + ph * 4.0;
+                let rr = 5.0 + 3.0 * ph.abs();
+                draw_line(px - rr, py, px + rr, py, 2.0, fade(WHITE, a));
+                draw_line(px, py - rr, px, py + rr, 2.0, fade(WHITE, a));
+            }
+        }
+        return true;
+    }
+    if f.text.starts_with('x') {
+        // The combo count is the burst beside the presents counter.
+        return true;
+    }
+    if f.text.starts_with('#') {
+        // The rank stamp snaps down onto the pennant that marks this run.
+        let anchor = app.cam.to_screen(f.pos.x, f.pos.y);
+        let drift = -90.0 * (1.0 - (1.0 - (k / 0.25).min(1.0)).powi(3)) + 90.0;
+        let x = anchor.x.clamp(130.0, sw - 130.0);
+        let y = (anchor.y - drift).clamp(150.0, sh - 60.0);
+        let a = if k < 0.7 { 1.0 } else { (1.0 - k) / 0.3 };
+        let pop = ui::ease_out_elastic(k / 0.3);
+        ui::spr(&kit.seal_gold, vec2(x, y - 14.0), 78.0 * pop, -0.15, ui::tint(a));
+        ui::text_painted(big, &f.text, x, y - 2.0, 32, pop.max(0.01), fade(PAPER, a), fade(GOLD_DEEP, a), 3.0, -0.15);
+        return true;
+    }
+    false
+}
+
+/// The results postcard: ribbon header, portrait with medal, the distance
+/// counting up, a best comparison, stat chips, the scoreboard and a big
+/// FLY AGAIN button.
 fn results(app: &App) {
     let g = &app.game;
-    let (font, big) = (&app.font, &app.display);
+    let big = &app.display;
+    let kit = &app.sprites.ui;
     let sw = screen_width();
     let sh = screen_height();
     let t = get_time() as f32;
@@ -544,159 +691,280 @@ fn results(app: &App) {
     if since < 0.0 {
         return;
     }
-    let enter = ease_out_back(since / 0.14);
-    draw_rectangle(0.0, 0.0, sw, sh, fade(INK, 0.45 * since.min(0.2) / 0.2));
+    let enter = ui::ease_out_back(since / 0.4);
+    draw_rectangle(0.0, 0.0, sw, sh, fade(Color::new(0.06, 0.08, 0.18, 1.0), 0.55 * (since / 0.3).min(1.0)));
     let r = results_rect();
-    let (x, y, w, h) = (r.x, r.y + 40.0 * (1.0 - enter), r.w, r.h);
+    let (x, y, w, h) = (r.x, r.y + (sh - r.y) * (1.0 - enter), r.w, r.h);
     let new_best = g.distance() >= g.best_distance - 0.01 && g.distance() > 0.0;
+    let my_rank = app.scores.iter().position(|sc| (sc.distance - g.distance()).abs() < 0.01 && sc.pilot == app.pilot_idx);
     if new_best {
-        for i in 0..16 {
-            let a = i as f32 * std::f32::consts::TAU / 16.0 + t * 0.3;
-            let c = vec2(sw / 2.0, y + h / 2.0);
-            draw_triangle(c, c + vec2(a.cos(), a.sin()) * 520.0, c + vec2((a + 0.09).cos(), (a + 0.09).sin()) * 520.0, fade(GOLD, 0.10));
+        // Slow golden rays behind the card.
+        for i in 0..18 {
+            let a = i as f32 * std::f32::consts::TAU / 18.0 + t * 0.25;
+            let c = vec2(sw / 2.0, y + h * 0.4);
+            draw_triangle(c, c + vec2(a.cos(), a.sin()) * 640.0, c + vec2((a + 0.12).cos(), (a + 0.12).sin()) * 640.0, fade(GOLD, 0.16));
         }
     }
-    plate(x, y, w, h, 14.0, PAPER, INK, 1.0);
-    // A record gets the gold stamp; the outcome becomes a sub-line.
-    let outcome = if g.crashed { &app.pack.labels.crash } else { &app.pack.labels.flight_over };
-    if new_best {
-        stamp(x + 92.0, y + 10.0, 150.0, 42.0, -6.0f32.to_radians(), GOLD, "NEW BEST!", big);
-        text(font, outcome, x + 92.0, y + 52.0, 13, if g.crashed { BERRY } else { SLATE }, Align::Center);
+    ui::panel(&kit.panel, Rect::new(x, y, w, h), 0.9, WHITE);
+    ui::nine(&kit.snow_wide, Rect::new(x - 8.0, y - 14.0, w + 16.0, 52.0), 40.0, 26.0, WHITE);
+    ui::spr(&kit.holly, vec2(x + 40.0, y + 22.0), 92.0, -0.2, WHITE);
+    ui::spr(&kit.holly, vec2(x + w - 40.0, y + h - 18.0), 84.0, 2.9, WHITE);
+    // Header ribbon straddling the top edge.
+    let (head, rib, edge) = if new_best {
+        ("NEW BEST!".to_owned(), Rib::Gold, GOLD_DEEP)
+    } else if g.crashed {
+        (app.pack.labels.crash.clone(), Rib::Red, BERRY_DEEP)
     } else {
-        stamp(x + 92.0, y + 10.0, 150.0, 42.0, -6.0f32.to_radians(), BERRY, outcome, big);
+        (app.pack.labels.flight_over.clone(), Rib::Green, PINE_DEEP)
+    };
+    let hk = ui::ease_out_back((since - 0.15) / 0.35);
+    if hk > 0.0 {
+        let hw = ui::text_w(big, &head, 44, 1.0) + 120.0;
+        ui::ribbon(kit.ribbon(rib), vec2(x + w / 2.0, y + 4.0), hw * hk, 64.0 * hk, 0.0, WHITE);
+        ui::text_painted(big, &head, x + w / 2.0, y + 20.0, 44, hk, PAPER, edge, 3.5, 0.0);
+        if new_best || g.crashed {
+            let sub = if new_best && g.crashed { app.pack.labels.crash.as_str() } else { "" };
+            if !sub.is_empty() {
+                text(big, sub, x + w / 2.0, y + 54.0, 14, BERRY, Align::Center);
+            }
+        }
     }
-    // Left: the pilot as a round stamp and this run's distance, big.
-    let lx = x + 160.0;
-    draw_circle(lx, y + 118.0, 54.0, INK);
-    draw_circle(lx, y + 118.0, 50.0, if new_best { GOLD } else { SNOW });
-    let portrait = if new_best { &app.sprites.dogs_heads[app.pilot_idx][6] } else { &app.sprites.dogs[app.pilot_idx] };
-    blit(portrait, vec2(lx, y + 120.0), 90.0, 0.04, false, WHITE);
-    let tick = (since / 1.1).clamp(0.0, 1.0);
-    let ease = 1.0 - (1.0 - tick).powi(3);
-    number_unit(big, &format!("{:.1}", g.distance() * ease), "m", lx, y + 240.0, 68, 1.0, INK, Align::Center);
-    if tick >= 1.0 {
+
+    // Left: portrait, medal, the distance counting up, the comparison.
+    let lx = x + 200.0;
+    medallion(app, app.pilot_idx, vec2(lx, y + 128.0), 60.0, 150.0, false);
+    let pname = app.pack.pilots.get(app.pilot_idx).map(|p| p.name.as_str()).unwrap_or("?");
+    let tick = (since / 1.2).clamp(0.0, 1.0);
+    let ease = ui::ease_out_cubic(tick);
+    let landed_pop = 1.0 + 0.14 * (1.0 - ((since - 1.2) / 0.25).clamp(0.0, 1.0)) * if since > 1.2 { 1.0 } else { 0.0 };
+    number_painted(big, &format!("{:.1}", g.distance() * ease), "m", lx, y + 266.0, 72, landed_pop, INK, PAPER);
+    text(big, &format!("{} flew", pname).to_uppercase(), lx, y + 208.0, 15, SLATE, Align::Center);
+    // Medal / rosette slams on after the count.
+    let mk = (since - 1.25) / 0.45;
+    if mk > 0.0 {
+        let s = 2.4 - 1.4 * ui::ease_out_back(mk);
+        let a = (mk * 4.0).clamp(0.0, 1.0);
+        let at = vec2(lx + 70.0, y + 152.0);
         if new_best {
-            if app.best_before > 0.0 && app.best_before < g.distance() - 0.01 {
-                text(font, &format!("beats your {:.1} m", app.best_before), lx, y + 268.0, 14, SLATE, Align::Center);
+            ui::spr(&kit.rosette, at + vec2(4.0, 6.0), 92.0 * s, 0.18, ui::tint(a));
+            ui::text_painted(big, "BEST", at.x + 4.0, at.y + 4.0, 20, s, fade(BROWN, a), fade(Color::new(1.0, 0.95, 0.7, 1.0), a), 2.0, 0.18);
+        } else if let Some(rank) = my_rank.filter(|r| *r < 3) {
+            ui::spr(&kit.medals[rank], at, 70.0 * s, 0.15, ui::tint(a));
+            ui::text_painted(big, &format!("{}", rank + 1), at.x + 3.0, at.y + 22.0 * s, 22, s, fade(PAPER, a), fade(GOLD_DEEP, a), 2.0, 0.15);
+        } else if g.crashed {
+            ui::spr(&kit.stamp_red, at + vec2(0.0, 10.0), 120.0 * s, 0.2, ui::tint(a));
+            ui::text_painted(big, &app.pack.labels.crash, at.x, at.y + 19.0, 24, s * 0.9, fade(PAPER, a), fade(BERRY_DEEP, a), 2.5, 0.2);
+        }
+    }
+    // Best comparison bar.
+    let by = y + 296.0;
+    // The record this flight is measured against (the dev keys skip the
+    // launch that stores best_before, so fall back to the board).
+    let prev_best = if new_best { app.best_before } else { app.best_before.max(g.best_distance) };
+    let best = prev_best.max(g.distance()).max(1.0);
+    let bw = 300.0;
+    let bx = lx - bw / 2.0;
+    let fk = ui::ease_out_cubic((since - 0.3) / 1.0);
+    text(big, "THIS FLIGHT", bx, by, 14, SLATE, Align::Left);
+    if prev_best > 0.0 {
+        text(big, &format!("BEST {:.1} m", prev_best), bx + bw, by, 14, GOLD_DEEP, Align::Right);
+    }
+    let fill = if new_best { GOLD } else if g.crashed { BERRY } else { PINE };
+    ui::bar(bx, by + 8.0, bw, 16.0, g.distance() / best * fk, fill, Color::new(0.88, 0.82, 0.72, 1.0), PAPER_DEEP);
+    if prev_best > 0.0 && prev_best < best {
+        let mx = bx + bw * (prev_best / best);
+        draw_line(mx, by + 3.0, mx, by + 29.0, 3.0, GOLD_DEEP);
+        draw_triangle(vec2(mx - 6.0, by + 1.0), vec2(mx + 6.0, by + 1.0), vec2(mx, by + 8.0), GOLD_DEEP);
+    } else if prev_best > 0.0 {
+        let mx = bx + bw * (prev_best / best);
+        draw_line(mx - 1.5, by + 3.0, mx - 1.5, by + 29.0, 3.0, GOLD_DEEP);
+    }
+    if tick >= 1.0 {
+        let line = if new_best {
+            if prev_best > 0.0 && prev_best < g.distance() - 0.01 {
+                format!("+{:.1} m over your old best!", g.distance() - prev_best)
+            } else {
+                "your first record!".to_owned()
             }
         } else {
-            let short = (app.best_before - g.distance()).max(0.0);
-            text(font, &format!("{:.1} m short of your best", short), lx, y + 268.0, 14, SLATE, Align::Center);
+            format!("{:.1} m short of your best", (prev_best - g.distance()).max(0.0))
+        };
+        text(big, &line, lx, by + 52.0, 19, if new_best { GOLD_DEEP } else { INK }, Align::Center);
+        // Where in town the dog came down.
+        if let Some(d) = app.city.as_ref().and_then(|c| c.district_index(g.pos.x).map(|i| &c.districts[i])) {
+            let place = if d.landed.is_empty() { format!("landed in {}, {}", title_case(&d.name), d.street) } else { format!("landed {}", d.landed) };
+            text(big, &place, lx, by + 74.0, 14, BERRY, Align::Center);
         }
-        report_card(app, x + 44.0, y + 302.0, 232.0, !new_best);
+        if !new_best {
+            let tip = coach_tip(app);
+            let tw = ui::text_w(big, tip, 14, 1.0) + 44.0;
+            ui::chip(&kit.chip, Rect::new(lx - tw / 2.0, by + 88.0, tw, 30.0), 0.4, Color::new(1.0, 0.97, 0.86, 1.0));
+            ui::spr(&kit.ic_star, vec2(lx - tw / 2.0 + 17.0, by + 103.0), 22.0, 0.0, WHITE);
+            text(big, tip, lx + 10.0, by + 108.0, 14, INK, Align::Center);
+        }
     }
-    // Right: the scoreboard on ruled lines.
-    let sx = x + 330.0;
-    let sw_ = w - 360.0;
-    text(font, &app.pack.labels.scoreboard, sx, y + 42.0, 13, SLATE, Align::Left);
-    // Six rows; the window slides down so this run's row is always in it.
-    const ROWS: usize = 6;
-    let my_rank = app.scores.iter().position(|sc| (sc.distance - g.distance()).abs() < 0.01 && sc.pilot == app.pilot_idx);
+
+    // Right: stat chips, then the scoreboard.
+    let sx = x + 404.0;
+    let swd = w - 434.0;
+    stat_chips(app, sx, y + 62.0, swd, since);
+    let sy = y + 222.0;
+    ui::spr(&kit.ic_trophy, vec2(sx + 10.0, sy - 5.0), 22.0, 0.0, WHITE);
+    text(big, &app.pack.labels.scoreboard, sx + 26.0, sy, 16, INK, Align::Left);
+    const ROWS: usize = 4;
     let first = my_rank.map_or(0, |r| r.saturating_sub(ROWS - 1).min(app.scores.len().saturating_sub(ROWS)));
-    let mut ry = y + 56.0;
-    for (i, sc) in app.scores.iter().enumerate().skip(first).take(ROWS) {
+    let mut ry = sy + 8.0;
+    for (n, (i, sc)) in app.scores.iter().enumerate().skip(first).take(ROWS).enumerate() {
+        let rk = ui::ease_out_cubic((since - 0.5 - n as f32 * 0.08) / 0.35);
+        if rk <= 0.0 {
+            break;
+        }
+        let rx = sx + 40.0 * (1.0 - rk);
         let mine = my_rank == Some(i);
+        let cy = ry + 15.0;
         if mine {
-            rounded(sx - 8.0, ry, sw_ + 16.0, 32.0, 8.0, fade(GOLD, 0.22));
+            ui::chip(&kit.chip, Rect::new(rx - 6.0, ry + 1.0, swd + 12.0, 28.0), 0.35, Color::new(1.0, 0.9, 0.55, 1.0));
         }
-        let cy = ry + 16.0;
-        rank_circle(sx + 14.0, cy, i + 1, big);
-        blit(&app.sprites.dogs[sc.pilot.min(2)], vec2(sx + 46.0, cy - 2.0), 24.0, 0.0, false, WHITE);
+        if i < 3 {
+            ui::spr(&kit.medals[i], vec2(rx + 12.0, cy - 2.0), 22.0, 0.0, WHITE);
+        } else {
+            text(big, &(i + 1).to_string(), rx + 12.0, cy + 6.0, 16, SLATE, Align::Center);
+        }
+        blit(&app.sprites.dogs[sc.pilot.min(2)], vec2(rx + 42.0, cy - 2.0), 28.0, 0.0, false, WHITE);
         let pname = app.pack.pilots.get(sc.pilot).map(|p| p.name.as_str()).unwrap_or("?");
-        text(font, pname, sx + 66.0, cy + 5.0, 14, INK, Align::Left);
+        text(big, pname, rx + 62.0, cy + 6.0, 17, INK, Align::Left);
         if sc.crashed {
-            text(font, "splat", sx + sw_ - 78.0, cy + 5.0, 13, BERRY, Align::Right);
+            text(big, "splat", rx + swd - 74.0, cy + 5.0, 13, BERRY, Align::Right);
         }
-        number_unit(big, &format!("{:.1}", sc.distance), "m", sx + sw_, cy + 6.0, 17, 1.0, INK, Align::Right);
-        draw_line(sx - 4.0, ry + 32.0, sx + sw_ + 4.0, ry + 32.0, 1.0, fade(INK, 0.15));
-        ry += 34.0;
+        number_unit(big, &format!("{:.1}", sc.distance), "m", rx + swd, cy + 6.0, 18, 1.0, INK, Align::Right);
+        if !mine {
+            draw_line(rx, ry + 30.0, rx + swd, ry + 30.0, 1.0, fade(PAPER_DEEP, 0.35));
+        }
+        ry += 31.0;
     }
     if app.scores.is_empty() {
-        text(font, "no flights yet", sx + sw_ / 2.0, y + 100.0, 14, SLATE, Align::Center);
+        text(big, "no flights yet", sx + swd / 2.0, sy + 40.0, 14, SLATE, Align::Center);
     }
-    // A short board leaves room: the ghost of the best run fills it.
-    if app.scores.len() < 4 && !app.best_path.path.is_empty() {
-        if let Some(last) = app.best_path.path.last() {
-            let gy = ry + 12.0;
-            blit(&app.sprites.dogs_heads[app.best_path.pilot.min(2)][0], vec2(sx + 46.0, gy + 12.0), 26.0, 0.0, false, WHITE);
-            text(font, "ghost", sx + 66.0, gy + 18.0, 13, SLATE, Align::Left);
-            number_unit(big, &format!("{:.1}", last.0), "m", sx + sw_, gy + 19.0, 15, 1.0, SLATE, Align::Right);
-        }
-    }
-    trend_strip(app, sx, y + 274.0, sw_);
-    // Restart button, armed once the numbers have settled.
+    // The button: grey while the numbers settle, then green and breathing.
     let mut b = restart_button_rect();
-    b.y += 40.0 * (1.0 - enter);
+    b.y += y - r.y;
     let armed = since > 0.5;
-    let pressed = armed && is_mouse_button_down(MouseButton::Left) && b.contains(mouse_position().into());
-    button(b, &app.pack.labels.restart, big, armed, pressed);
-    text(font, "or press R", b.x + b.w / 2.0, b.y + b.h + 20.0, 13, SLATE, Align::Center);
+    let hover = armed && b.contains(mouse_position().into());
+    let pressed = hover && is_mouse_button_down(MouseButton::Left);
+    let bk = ui::ease_out_back((since - 0.35) / 0.35);
+    if bk > 0.0 {
+        let breathe = if armed && !pressed { 1.0 + 0.025 * (t * 4.0).sin() } else { 1.0 };
+        let s = bk * breathe;
+        let (bw, bh) = (b.w * s, b.h * s);
+        let c = vec2(b.x + b.w / 2.0, b.y + b.h / 2.0 + if pressed { 4.0 } else { 0.0 });
+        // ui_button: 300x100 svg, body x 8..292, y 6..78.
+        let k = bw / 284.0;
+        let tex = if armed { &kit.button } else { &kit.button_off };
+        let tintc = if hover && !pressed { Color::new(1.08, 1.08, 1.08, 1.0) } else { WHITE };
+        draw_texture_ex(tex, c.x - bw / 2.0 - 8.0 * k, c.y - bh / 2.0 - 6.0 * k, tintc, DrawTextureParams { dest_size: Some(vec2(300.0 * k, 100.0 * k)), ..Default::default() });
+        ui::spr(&kit.ic_restart, vec2(c.x - bw * 0.30, c.y - 1.0), 34.0 * s, 0.0, WHITE);
+        let label = app.pack.labels.restart.as_str();
+        ui::text_painted(big, label, c.x + 16.0 * s, c.y + 11.0 * s, 32, s, PAPER, if armed { PINE_DEEP } else { Color::new(0.36, 0.40, 0.47, 1.0) }, 3.0, 0.0);
+        text(big, "or press R", c.x, b.y + b.h + 22.0, 14, SLATE, Align::Center);
+    }
 }
 
-/// The power gauge: a paper half-dial with flat wedges, a candy-striped
-/// sweet spot and a candy-cane needle. `live` while the meter still swings.
+/// The run's numbers as painted chips: icon, label, value. Values worth
+/// celebrating sit on a gold pill.
+fn stat_chips(app: &App, x: f32, y: f32, w: f32, since: f32) {
+    let g = &app.game;
+    let big = &app.display;
+    let kit = &app.sprites.ui;
+    let slide = hamsters_core::SLIDE_TIME * (1.25 - 0.25 * g.push);
+    let jump_text = if g.jump_q >= hamsters_core::JUMP_PERFECT_FROM {
+        "perfect".to_owned()
+    } else if g.jump_q <= 0.0 {
+        "missed".to_owned()
+    } else if g.jump_t > 1.0 {
+        format!("late {:.2}s", (g.jump_t - 1.0) * slide)
+    } else {
+        format!("early {:.2}s", (1.0 - g.jump_t) * slide)
+    };
+    let rows: [(&Texture2D, &str, String, f32); 6] = [
+        (&kit.ic_push, "PUSH", format!("{:.0}%", g.push * 100.0), g.push),
+        (&kit.ic_jump, "JUMP", jump_text, g.jump_q),
+        (&kit.ic_ear, "FLAPS", format!("{}", g.flaps), (g.flaps as f32 / 30.0).clamp(0.0, 1.0)),
+        (&kit.ic_gift, "PRESENTS", format!("{}", g.presents), (g.presents as f32 / 8.0).clamp(0.0, 1.0)),
+        (&kit.ic_alt, "HEIGHT", format!("{:.0} m", g.max_height), (g.max_height / 160.0).clamp(0.0, 1.0)),
+        (&kit.ic_flag, "DISTANCE", format!("{:.0} m", g.distance()), if g.distance() >= g.best_distance - 0.01 { 1.0 } else { 0.5 }),
+    ];
+    let (cw, ch, gap) = ((w - 10.0) / 2.0, 42.0, 8.0);
+    for (i, (icon, lab, val, k)) in rows.iter().enumerate() {
+        let pk = ui::ease_out_back((since - 0.3 - i as f32 * 0.07) / 0.3);
+        if pk <= 0.0 {
+            continue;
+        }
+        let cx = x + (i % 2) as f32 * (cw + 10.0);
+        let cy = y + (i / 2) as f32 * (ch + gap);
+        let (pw, ph) = (cw * pk, ch * pk);
+        let r = Rect::new(cx + (cw - pw) / 2.0, cy + (ch - ph) / 2.0, pw, ph);
+        ui::chip(&kit.chip, r, 0.45, WHITE);
+        if pk < 0.9 {
+            continue;
+        }
+        ui::spr(icon, vec2(cx + 22.0, cy + ch / 2.0), 30.0, 0.0, WHITE);
+        text(big, lab, cx + 42.0, cy + 17.0, 12, SLATE, Align::Left);
+        if *k >= 0.82 {
+            gold_pill(big, val, cx + 50.0, cy + 36.0, 16, Align::Left, 1.0);
+        } else {
+            text(big, val, cx + 42.0, cy + 36.0, 18, if *k < 0.3 { BERRY } else { INK }, Align::Left);
+        }
+    }
+}
+
+/// The coach line for the weakest of the three skills.
+fn coach_tip(app: &App) -> &str {
+    let g = &app.game;
+    let l = &app.pack.labels;
+    let air_k = ((g.flaps as f32 / 40.0) + (g.presents as f32 / 10.0)).clamp(0.0, 1.0);
+    let ks = [g.push, g.jump_q, air_k];
+    let weakest = ks.iter().enumerate().min_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i).unwrap_or(0);
+    match weakest {
+        0 => &l.tip_push,
+        1 => &l.tip_jump,
+        _ => &l.tip_air,
+    }
+}
+
+/// The power gauge: the painted dial with a candy-cane needle. `live` while
+/// the meter still swings.
 fn power_dial(app: &App, cx: f32, cy: f32, value: f32, live: bool) {
-    let (font, big) = (&app.font, &app.display);
-    let r = 96.0;
-    let base = 24.0;
+    let big = &app.display;
+    let kit = &app.sprites.ui;
     let t = get_time() as f32;
     let sweet = value > 0.82;
     let pulse = if sweet { 1.0 + 0.06 * (t * 10.0).sin() } else { 1.0 };
-    half_disc(cx, cy + 4.0, r + 24.0, base, fade(INK, SHADOW_ALPHA));
-    half_disc(cx, cy, r + 24.0, base, if sweet { lerp(INK, GOLD, 0.5 + 0.5 * (t * 10.0).sin()) } else { INK });
-    half_disc(cx, cy, r + 21.0, base - 3.0, PAPER);
-    // Wedges from left (0) to right (1) along the upper half.
-    let wedge = |a0: f32, a1: f32, col: Color, rad: f32, wd: f32| {
-        let n = 16;
-        for i in 0..n {
-            let k0 = a0 + (a1 - a0) * i as f32 / n as f32;
-            let k1 = a0 + (a1 - a0) * (i + 1) as f32 / n as f32;
-            let (p0, p1) = (std::f32::consts::PI * (1.0 - k0), std::f32::consts::PI * (1.0 - k1));
-            let (o0, o1) = (vec2(cx + p0.cos() * rad, cy - p0.sin() * rad), vec2(cx + p1.cos() * rad, cy - p1.sin() * rad));
-            let (i0, i1) = (vec2(cx + p0.cos() * (rad - wd), cy - p0.sin() * (rad - wd)), vec2(cx + p1.cos() * (rad - wd), cy - p1.sin() * (rad - wd)));
-            draw_triangle(o0, o1, i0, col);
-            draw_triangle(o1, i1, i0, col);
+    let k = 0.82;
+    if sweet {
+        // A gold halo pulsing round the rim.
+        let a = 0.35 + 0.25 * (t * 10.0).sin();
+        for i in 0..3 {
+            draw_arc(cx, cy, 48, 122.0 + i as f32 * 5.0, 180.0, 6.0, 180.0, fade(GOLD, a / (1.0 + i as f32)));
         }
-    };
-    wedge(0.0, 1.0, INK, r + 2.0, 30.0);
-    wedge(0.0, 0.5, PINE, r - 1.0, 24.0);
-    wedge(0.5, 0.82, AMBER, r - 1.0, 24.0);
-    for i in 0..12 {
-        let (a0, a1) = (0.82 + 0.18 * i as f32 / 12.0, 0.82 + 0.18 * (i + 1) as f32 / 12.0);
-        wedge(a0, a1, if i % 2 == 0 { GOLD } else { PAPER }, r - 1.0, 24.0);
     }
-    for k in [0.5, 0.82] {
-        let a = std::f32::consts::PI * (1.0 - k);
-        draw_line(cx + a.cos() * (r + 2.0), cy - a.sin() * (r + 2.0), cx + a.cos() * (r - 28.0), cy - a.sin() * (r - 28.0), 3.0, INK);
-    }
-    // Candy-cane needle: ink edge, paper body, berry stripes.
+    draw_texture_ex(&kit.dial, cx - 160.0 * k, cy - 152.0 * k, WHITE, DrawTextureParams { dest_size: Some(vec2(320.0 * k, 176.0 * k)), ..Default::default() });
     let wob = if live { (t * 40.0).sin() * 0.006 } else { 0.0 };
-    let a = std::f32::consts::PI * (1.0 - (value + wob).clamp(0.0, 1.0));
-    let dir = vec2(a.cos(), -a.sin());
-    let tip = vec2(cx, cy) + dir * (r - 6.0);
-    draw_line(cx, cy, tip.x, tip.y, 12.0, INK);
-    draw_circle(tip.x, tip.y, 6.0, INK);
-    draw_line(cx, cy, tip.x, tip.y, 7.0, PAPER);
-    draw_circle(tip.x, tip.y, 3.5, PAPER);
-    let len = r - 6.0;
-    let mut d = 6.0;
-    while d + 8.0 < len {
-        let p0 = vec2(cx, cy) + dir * d;
-        let p1 = vec2(cx, cy) + dir * (d + 8.0);
-        draw_line(p0.x, p0.y, p1.x, p1.y, 7.0, BERRY);
-        d += 16.0;
-    }
-    draw_circle(cx, cy, 13.0, INK);
-    draw_circle(cx, cy, 9.0, PAPER);
+    let v = (value + wob).clamp(0.0, 1.0);
+    let rot = (v - 0.5) * std::f32::consts::PI;
+    // ui_needle: 28x124 svg, pivot (14,110).
+    draw_texture_ex(&kit.needle, cx - 14.0 * k, cy - 110.0 * k, WHITE, DrawTextureParams { dest_size: Some(vec2(28.0 * k, 124.0 * k)), rotation: rot, pivot: Some(vec2(cx, cy)), ..Default::default() });
     // Readout: where this push lands is the hero; the percent is the footnote.
     match app.aim_distance() {
-        Some(d) => number_unit(big, &format!("~{:.0}", d), "m", cx, cy - 44.0, 34, pulse, INK, Align::Center),
-        None => text_scaled(big, &format!("{:.0}", value * 100.0), cx, cy - 44.0, 34, pulse, INK, Align::Center),
+        Some(d) => number_painted(big, &format!("~{:.0}", d), "m", cx, cy - 40.0, 28, pulse, INK, PAPER),
+        None => number_painted(big, &format!("{:.0}", value * 100.0), "", cx, cy - 40.0, 28, pulse, INK, PAPER),
     }
+    // The percent is a footnote left of the hub, where the needle seldom is.
+    text(big, &format!("{:.0}%", value * 100.0), cx - 15.0, cy + 5.0, 14, SLATE, Align::Right);
     if sweet {
-        text_shout(font, "SWEET SPOT", cx, cy + 18.0, 15, 1.0, GOLD, Align::Center);
-    } else {
-        text(font, &format!("{:.0}% POWER", value * 100.0), cx, cy + 18.0, 15, SLATE, Align::Center);
+        // A gold ribbon pops over the dial.
+        let w = ui::text_w(big, "SWEET SPOT!", 22, 1.0) + 30.0;
+        ui::ribbon(kit.ribbon(Rib::Gold), vec2(cx, cy - 146.0), w * pulse, 36.0 * pulse, -0.03, WHITE);
+        ui::text_painted(big, "SWEET SPOT!", cx, cy - 138.0, 22, pulse, PAPER, GOLD_DEEP, 2.5, -0.03);
     }
 }
 
@@ -709,19 +977,20 @@ fn key_caps(font: &Font, cx: f32, cy: f32, k: f32) -> f32 {
     let mw = 18.0 * k;
     let total = kw + gap + mw;
     let x0 = cx - total / 2.0;
-    // Key cap: ink shadow plate, paper cap, label.
-    rounded(x0, cy - kh / 2.0 + 3.0 * k, kw, kh, 6.0 * k, INK);
-    rounded(x0, cy - kh / 2.0, kw, kh, 6.0 * k, INK);
-    rounded(x0 + 2.0 * k, cy - kh / 2.0 + 2.0 * k, kw - 4.0 * k, kh - 4.0 * k, 4.5 * k, PAPER);
+    // Key cap: a deep lip, paper cap, label.
+    ui::rrect(x0, cy - kh / 2.0 + 3.0 * k, kw, kh, 6.0 * k, BROWN);
+    ui::rrect(x0, cy - kh / 2.0, kw, kh, 6.0 * k, BROWN);
+    ui::rrect(x0 + 2.0 * k, cy - kh / 2.0 + 2.0 * k, kw - 4.0 * k, kh - 4.0 * k, 4.5 * k, SNOW);
+    ui::rrect(x0 + 4.0 * k, cy - kh / 2.0 + 3.0 * k, kw - 8.0 * k, kh * 0.3, 3.0 * k, WHITE);
     text_scaled(font, "SPACE", x0 + kw / 2.0, cy + 5.0 * k, 14, k, INK, Align::Center);
     // Mouse: a pill with the left button in berry.
     let mx = x0 + kw + gap;
     let mh = 26.0 * k;
-    rounded(mx, cy - mh / 2.0 + 3.0 * k, mw, mh, 9.0 * k, INK);
-    rounded(mx, cy - mh / 2.0, mw, mh, 9.0 * k, INK);
-    rounded(mx + 2.0 * k, cy - mh / 2.0 + 2.0 * k, mw - 4.0 * k, mh - 4.0 * k, 7.0 * k, PAPER);
+    rounded(mx, cy - mh / 2.0 + 3.0 * k, mw, mh, 9.0 * k, BROWN);
+    rounded(mx, cy - mh / 2.0, mw, mh, 9.0 * k, BROWN);
+    rounded(mx + 2.0 * k, cy - mh / 2.0 + 2.0 * k, mw - 4.0 * k, mh - 4.0 * k, 7.0 * k, SNOW);
     rounded(mx + 2.5 * k, cy - mh / 2.0 + 2.5 * k, (mw - 5.0 * k) / 2.0, mh * 0.42, 5.0 * k, BERRY);
-    draw_line(mx + mw / 2.0, cy - mh / 2.0 + 2.0 * k, mx + mw / 2.0, cy - 1.0 * k, 1.5 * k, INK);
+    draw_line(mx + mw / 2.0, cy - mh / 2.0 + 2.0 * k, mx + mw / 2.0, cy - 1.0 * k, 1.5 * k, BROWN);
     total
 }
 
@@ -742,28 +1011,30 @@ fn jump_prompt(app: &App, t: f32) {
     let a = 1.0 - ((t - 0.70) / 0.07).clamp(0.0, 1.0);
     let window = ((t - 0.78) / 0.12).clamp(0.0, 1.0);
     if a > 0.0 {
-        // Paper plate: [SPACE] [mouse]  TO JUMP
         let label = "TO JUMP";
-        let d = measure_text(label, Some(big), 22, 1.0);
+        let tw = ui::text_w(big, label, 24, 1.0);
         let caps_w = 62.0 + 8.0 + 18.0;
-        let w = caps_w + 14.0 + d.width + 36.0;
-        let h = 46.0;
+        let pop = ui::ease_out_back(t / 0.12) * a;
+        let w = (caps_w + 14.0 + tw + 36.0) * pop;
+        let h = 50.0 * pop;
         let bob = (time * 5.0).sin() * 3.0;
         let (px, py) = (x - w / 2.0, y - h / 2.0 + bob);
-        plate(px, py, w, h, 10.0, PAPER, INK, a);
-        if a > 0.5 {
-            key_caps(font, px + 18.0 + caps_w / 2.0, py + h / 2.0, 1.0);
-            text(big, label, px + 18.0 + caps_w + 14.0, py + h / 2.0 + 8.0, 22, INK, Align::Left);
-            // A little tail pointing at the dog.
-            draw_triangle(vec2(x - 8.0, py + h), vec2(x + 8.0, py + h), vec2(x, py + h + 10.0), INK);
+        if pop > 0.05 {
+            ui::panel(&app.sprites.ui.panel, Rect::new(px, py, w, h), 0.42 * pop, WHITE);
+            draw_triangle(vec2(x - 10.0, py + h + 3.0), vec2(x + 10.0, py + h + 3.0), vec2(x, py + h + 14.0), PAPER_DEEP);
+            draw_triangle(vec2(x - 7.0, py + h + 1.0), vec2(x + 7.0, py + h + 1.0), vec2(x, py + h + 9.0), PAPER);
+        }
+        if pop > 0.6 {
+            key_caps(font, px + 18.0 * pop + caps_w * pop / 2.0, py + h / 2.0, pop);
+            text_scaled(big, label, px + (18.0 + caps_w + 14.0) * pop, py + h / 2.0 + 9.0 * pop, 24, pop, INK, Align::Left);
         }
     }
     if window > 0.0 {
         // JUMP! in gold, growing in, pulsing fast; the key cap stays under it.
         let pop = ease_out_back(window);
         let pulse = 1.0 + 0.08 * (time * 18.0).sin().abs();
-        text_shout(big, "JUMP!", x, y - 6.0, 44, pop * pulse, GOLD, Align::Center);
-        key_caps(font, x, y + 18.0, 0.8 * pop);
+        ui::text_painted(big, "JUMP!", x, y - 4.0, 52, pop * pulse, GOLD, GOLD_DEEP, 4.0, -0.05);
+        key_caps(font, x, y + 22.0, 0.8 * pop);
     }
 }
 
@@ -791,44 +1062,92 @@ fn jump_timer(app: &App, t: f32) {
     let _ = t;
 }
 
-/// Three paper cards on the right: portrait, name, trait, best. The chosen
-/// one lifts and gets a gold outline; each has a berry tab with its key.
-fn picker(app: &App) {
-    let (font, big) = (&app.font, &app.display);
+/// Three painted pilot cards on the right: a big portrait medallion, the
+/// name, the trait, three stat bars and the pilot's best. The chosen one is
+/// gold-framed, lifted and glowing; each has a wax seal with its key.
+/// `since` drives the slide-in, `out` (0..1) the exit.
+fn picker(app: &App, since: f32, pilot_since: f32, out: f32) {
+    let big = &app.display;
+    let kit = &app.sprites.ui;
     let cards = picker_cards();
-    // Title on an ink chip so it reads over the sun.
-    let title = "PICK YOUR PILOT   1 / 2 / 3";
-    let d = measure_text(title, Some(font), 14, 1.0);
-    let (tx, ty) = (cards[0].x + cards[0].w, cards[0].y - 22.0);
-    rounded(tx - d.width - 20.0, ty - 16.0, d.width + 20.0, 24.0, 7.0, INK);
-    text(font, title, tx - 10.0, ty + 1.0, 14, PAPER, Align::Right);
+    let t = get_time() as f32;
+    // Header ribbon.
+    let hk = ui::ease_out_back((since - 0.05) / 0.35);
+    let hx = cards[0].x + cards[0].w / 2.0 + out * 340.0;
+    if hk > 0.0 {
+        let title = "PICK YOUR PILOT";
+        let tw = ui::text_w(big, title, 22, 1.0);
+        ui::ribbon(kit.ribbon(Rib::Green), vec2(hx, 40.0), (tw + 40.0) * hk, 38.0 * hk, 0.0, WHITE);
+        ui::text_painted(big, title, hx, 48.0, 22, hk, PAPER, PINE_DEEP, 2.5, 0.0);
+    }
     for (i, h) in PILOTS.iter().enumerate() {
         let selected = i == app.pilot_idx;
+        let ek = ui::ease_out_back((since - 0.12 - i as f32 * 0.08) / 0.4);
+        if ek <= 0.0 {
+            continue;
+        }
         let mut r = cards[i];
-        let alpha = if selected { 1.0 } else { 0.85 };
+        r.x += (1.0 - ek) * 320.0 + out * (340.0 + i as f32 * 40.0);
+        let bump = if selected { (1.0 - (pilot_since / 0.35).clamp(0.0, 1.0)) * (pilot_since / 0.35 * std::f32::consts::PI).sin().max(0.0) } else { 0.0 };
         if selected {
-            r.y -= 8.0;
-            rounded(r.x - 4.0, r.y - 4.0, r.w + 8.0, r.h + 8.0, 16.0, GOLD);
+            r.x -= 10.0;
+            r.y -= 2.0;
+            // Soft gold glow behind the chosen card.
+            let glow = 0.5 + 0.5 * (t * 3.0).sin();
+            for g in 0..4 {
+                let e = 4.0 + g as f32 * 4.0;
+                ui::rrect(r.x - e, r.y - e, r.w + 2.0 * e, r.h + 2.0 * e, 16.0 + e, fade(GOLD, (0.16 + 0.06 * glow) / (1.0 + g as f32)));
+            }
         }
-        plate(r.x, r.y, r.w, r.h, 12.0, PAPER, INK, alpha);
-        // Key tab.
-        rounded(r.x + 10.0, r.y - 8.0, 24.0, 28.0, 5.0, INK);
-        rounded(r.x + 13.0, r.y - 5.0, 18.0, 22.0, 3.0, BERRY);
-        text(big, &(i + 1).to_string(), r.x + 22.0, r.y + 12.0, 15, PAPER, Align::Center);
-        blit(&app.sprites.dogs[i], vec2(r.x + 60.0, r.y + r.h / 2.0), 52.0, 0.0, false, WHITE);
+        let tex = if selected { &kit.panel_gold } else { &kit.panel };
+        let dim = if selected { WHITE } else { Color::new(0.93, 0.93, 0.95, 1.0) };
+        ui::panel(tex, r, 0.55, dim);
+        if selected {
+            ui::nine(&kit.snow_small, Rect::new(r.x + 18.0, r.y - 8.0, r.w - 30.0, 18.0), 30.0, 12.0, WHITE);
+        }
+        let m = vec2(r.x + 54.0, r.y + r.h / 2.0 + 2.0);
+        medallion(app, i, m, 38.0 * (1.0 + 0.08 * bump), 116.0 * (1.0 + 0.12 * bump), !selected);
+        // Key seal.
+        ui::spr(&kit.seal_red, vec2(r.x + 12.0, r.y + 12.0), 38.0, -0.2, WHITE);
+        ui::text_painted(big, &(i + 1).to_string(), r.x + 12.0, r.y + 19.0, 19, 1.0, PAPER, BERRY_DEEP, 1.8, -0.2);
         let (pname, word) = app.pack.pilots.get(i).map(|t| (t.name.as_str(), t.word.as_str())).unwrap_or((h.name, "far"));
-        text(big, pname, r.x + 92.0, r.y + 27.0, 22, if selected { INK } else { SLATE }, Align::Left);
-        text(font, word, r.x + 92.0, r.y + 46.0, 14, SLATE, Align::Left);
-        if let Some(b) = app.pilot_best(i) {
-            text(font, &format!("best {:.0} m", b), r.x + r.w - 12.0, r.y + 46.0, 13, SLATE, Align::Right);
+        let nx = r.x + 104.0;
+        text(big, pname, nx, r.y + 31.0, 26, if selected { INK } else { SLATE }, Align::Left);
+        // Trait on a small coloured tag.
+        let (light, deep) = pilot_colors(i);
+        let ww = ui::text_w(big, word, 13, 1.0) + 14.0;
+        let wx = r.x + r.w - 14.0 - ww;
+        ui::rrect(wx - 1.5, r.y + 13.5, ww + 3.0, 21.0, 10.5, ui::shade(deep, 0.7));
+        ui::rrect(wx, r.y + 15.0, ww, 18.0, 9.0, deep);
+        ui::rrect(wx + 3.0, r.y + 16.5, ww - 6.0, 5.0, 2.5, fade(light, 0.6));
+        text(big, word, wx + ww / 2.0, r.y + 29.0, 13, PAPER, Align::Center);
+        // Stat bars grow in.
+        let stats = [
+            (&kit.ic_speed, ((h.launch_speed - 45.0) / 40.0).clamp(0.1, 1.0)),
+            (&kit.ic_ear, (h.flap_power / 1.5).clamp(0.1, 1.0)),
+            (&kit.ic_bounce, (h.bounce / 0.8).clamp(0.1, 1.0)),
+        ];
+        let gk = ui::ease_out_cubic((since - 0.35 - i as f32 * 0.08) / 0.6);
+        for (j, (ic, v)) in stats.iter().enumerate() {
+            let sy = r.y + 46.0 + j as f32 * 15.0;
+            ui::spr(ic, vec2(nx + 6.0, sy), 16.0, 0.0, WHITE);
+            ui::bar(nx + 20.0, sy - 4.0, 112.0, 8.0, v * gk, if selected { lerp(deep, light, 0.3) } else { ui::shade(lerp(deep, light, 0.3), 0.85) }, Color::new(0.87, 0.81, 0.70, 1.0), PAPER_DEEP);
         }
-        // Today's course on its own line: a gold dot while it is still to fly.
+        let ly = r.y + r.h - 9.0;
+        match app.pilot_best(i) {
+            Some(b) => {
+                ui::spr(&kit.ic_trophy, vec2(nx + 6.0, ly - 5.0), 17.0, 0.0, WHITE);
+                text(big, &format!("best {:.0} m", b), nx + 18.0, ly, 14, INK, Align::Left);
+            }
+            None => text(big, "no record yet", nx, ly, 14, SLATE, Align::Left),
+        }
+        // Today's course: a gold star while it is still to fly.
         match app.today_flown(i) {
-            Some(d) => text(font, &format!("today {:.0} m", d), r.x + 92.0, r.y + 64.0, 13, INK, Align::Left),
+            Some(d) => text(big, &format!("today {:.0} m", d), r.x + r.w - 14.0, ly, 14, SLATE, Align::Right),
             None => {
-                draw_circle(r.x + 97.0, r.y + 59.5, 4.5, INK);
-                draw_circle(r.x + 97.0, r.y + 59.5, 3.0, GOLD);
-                text(font, "today's course", r.x + 106.0, r.y + 64.0, 13, SLATE, Align::Left);
+                let tw = ui::text_w(big, "today", 14, 1.0);
+                ui::spr(&kit.ic_star, vec2(r.x + r.w - 23.0 - tw, ly - 5.0), 17.0, 0.0, WHITE);
+                text(big, "today", r.x + r.w - 14.0, ly, 14, GOLD_DEEP, Align::Right);
             }
         }
     }
@@ -838,14 +1157,13 @@ fn picker(app: &App) {
 /// plus the live scoreboard rank for half a second after it changes.
 fn rank_line(app: &App, right_x: f32, y: f32, alpha: f32) {
     let g = &app.game;
-    let font = &app.font;
     let t = get_time() as f32;
     if app.best_beaten {
         gold_pill(&app.display, "NEW BEST", right_x, y + 2.0, 18, Align::Right, alpha);
     } else if let Some((rank, d)) = app.target() {
         let near = app.ghost_flag_x().map_or(false, |fx| g.phase == Phase::Flying && (fx - g.pos.x).abs() < 15.0);
         let col = if near { lerp(SLATE, INK, 0.5 + 0.5 * (t * 8.0).sin()) } else { SLATE };
-        text(font, &format!("{:.0} m to #{}", (d - g.distance()).max(0.0), rank), right_x, y, 14, fade(col, alpha), Align::Right);
+        text(&app.display, &format!("{:.0} m to #{}", (d - g.distance()).max(0.0), rank), right_x, y, 14, fade(col, alpha), Align::Right);
     }
     if app.rank_pulse > 0.0 && g.phase == Phase::Flying {
         let k = app.rank_pulse / 0.5;
@@ -867,130 +1185,46 @@ const FIRST_FLIGHT: &str = "first flight!";
 
 /// Before the push: the rung to beat this run, or a first-flight greeting.
 fn target_plank(app: &App, right_x: f32, y: f32) {
-    let (w, h) = (156.0, 48.0);
+    let kit = &app.sprites.ui;
+    let (w, h) = (164.0, 54.0);
     let x = right_x - w;
-    plate(x, y, w, h, 10.0, PAPER, INK, 1.0);
-    text(&app.font, "TARGET", x + 14.0, y + 19.0, 13, SLATE, Align::Left);
+    ui::panel(&kit.panel, Rect::new(x, y, w, h), 0.45, WHITE);
+    ui::spr(&kit.ic_flag, vec2(x + 24.0, y + h / 2.0), 34.0, 0.0, WHITE);
+    text(&app.display, "TARGET", x + 46.0, y + 21.0, 14, SLATE, Align::Left);
     match app.target() {
-        Some((rank, d)) => gold_pill(&app.display, &format!("#{} · {:.0} m", rank, d), x + 18.0, y + 40.0, 17, Align::Left, 1.0),
-        None => {
-            pennant_glyph(x + 16.0, y + 42.0, 20.0, BERRY);
-            text(&app.font, FIRST_FLIGHT, x + 34.0, y + 39.0, 14, INK, Align::Left);
-        }
+        Some((rank, d)) => gold_pill(&app.display, &format!("#{} · {:.0} m", rank, d), x + 50.0, y + 43.0, 17, Align::Left, 1.0),
+        None => text(&app.display, FIRST_FLIGHT, x + 46.0, y + 42.0, 17, BERRY, Align::Left),
     }
 }
 
 /// Today's course: the three pilots with a dash or today's distance under
 /// each, so the day's three flights read as one small session.
 fn today_plank(app: &App, x: f32, y: f32) {
-    let (w, h) = (156.0, 48.0);
-    plate(x, y, w, h, 10.0, PAPER, INK, 1.0);
-    text(&app.font, "TODAY", x + 14.0, y + 19.0, 13, SLATE, Align::Left);
+    let kit = &app.sprites.ui;
+    let (w, h) = (164.0, 54.0);
+    ui::panel(&kit.panel, Rect::new(x, y, w, h), 0.45, WHITE);
+    ui::spr(&kit.ic_star, vec2(x + 20.0, y + 20.0), 22.0, 0.0, WHITE);
+    text(&app.display, "TODAY", x + 8.0, y + 47.0, 13, SLATE, Align::Left);
     for i in 0..3 {
-        let cx = x + 70.0 + i as f32 * 32.0;
-        blit(&app.sprites.dogs[i], vec2(cx, y + 15.0), 24.0, 0.0, false, WHITE);
+        let cx = x + 72.0 + i as f32 * 34.0;
+        blit(&app.sprites.dogs[i], vec2(cx, y + 18.0), 30.0, 0.0, false, WHITE);
         match app.today_flown(i) {
-            Some(d) => gold_pill(&app.display, &format!("{:.0}", d), cx, y + 41.0, 12, Align::Center, 1.0),
-            None => rounded(cx - 5.0, y + 35.0, 10.0, 2.0, 1.0, SLATE),
+            Some(d) => gold_pill(&app.display, &format!("{:.0}", d), cx, y + 46.0, 12, Align::Center, 1.0),
+            None => ui::rrect(cx - 6.0, y + 40.0, 12.0, 3.0, 1.5, SLATE),
         }
     }
 }
 
-/// The last few flights as bars, newest right: silver, this run berry, a
-/// gold dashed line at the previous best, a berry cap on every splat.
-fn trend_strip(app: &App, x: f32, y: f32, w: f32) {
-    let g = &app.game;
-    let font = &app.font;
-    if app.recent.is_empty() {
-        return;
-    }
-    let (bw, pitch, max_h) = (22.0, 30.0, 70.0);
-    let n = crate::RECENT_RUNS;
-    let strip_w = pitch * n as f32 - (pitch - bw);
-    let x0 = x + (w - strip_w) / 2.0;
-    let base = y + max_h;
-    let scale_to = app.recent.iter().map(|s| s.distance).fold(app.best_before, f32::max).max(1.0);
-    for (i, sc) in app.recent.iter().enumerate() {
-        let slot = n - app.recent.len() + i;
-        let bx = x0 + slot as f32 * pitch;
-        let bh = (max_h * sc.distance / scale_to).max(4.0);
-        let mine = i + 1 == app.recent.len() && (sc.distance - g.distance()).abs() < 0.01;
-        rounded(bx - 2.0, base - bh - 2.0, bw + 4.0, bh + 2.0, 4.0, INK);
-        rounded(bx, base - bh, bw, bh, 3.0, if mine { BERRY } else { SILVER });
-        if sc.crashed {
-            rounded(bx, base - bh, bw, 3.0, 1.5, BERRY);
-        }
-    }
-    draw_line(x0 - 4.0, base + 1.0, x0 + strip_w + 4.0, base + 1.0, 2.0, INK);
-    if app.best_before > 0.0 {
-        let by = base - max_h * (app.best_before / scale_to).min(1.0);
-        let mut dx = x0 - 4.0;
-        while dx < x0 + strip_w + 4.0 {
-            draw_line(dx, by, (dx + 6.0).min(x0 + strip_w + 4.0), by, 2.0, GOLD);
-            dx += 10.0;
-        }
-    }
-    if let Some(avg) = app.recent_avg() {
-        text(font, &format!("last {} · avg {:.0} m", app.recent.len(), avg), x + w / 2.0, base + 16.0, 12, SLATE, Align::Center);
-    }
-}
-
-/// Grade colour: gold for a great value, ink for fine, berry for poor.
-fn grade(k: f32) -> Color {
-    if k >= 0.82 {
-        GOLD
-    } else if k >= 0.4 {
-        INK
-    } else {
-        BERRY
-    }
-}
-
-/// The report card: the three skills of a run, each graded, and one coach
-/// line for the weakest of them.
-fn report_card(app: &App, x: f32, y: f32, w: f32, with_tip: bool) {
-    let g = &app.game;
-    let (font, big) = (&app.font, &app.display);
-    let l = &app.pack.labels;
-    let slide = hamsters_core::SLIDE_TIME * (1.25 - 0.25 * g.push);
-    let jump_text = if g.jump_q >= hamsters_core::JUMP_PERFECT_FROM {
-        "perfect".to_owned()
-    } else if g.jump_q <= 0.0 {
-        "missed".to_owned()
-    } else if g.jump_t > 1.0 {
-        format!("late by {:.2} s", (g.jump_t - 1.0) * slide)
-    } else {
-        format!("early by {:.2} s", (1.0 - g.jump_t) * slide)
-    };
-    // Air grade: presents and flaps both count; forty flaps or ten presents is a full mark.
-    let air_k = ((g.flaps as f32 / 40.0) + (g.presents as f32 / 10.0)).clamp(0.0, 1.0);
-    let rows = [
-        ("PUSH", format!("{:.0}%", g.push * 100.0), g.push),
-        ("JUMP", jump_text, g.jump_q),
-        ("AIR", format!("{} flaps · {} presents", g.flaps, g.presents), air_k),
-        ("HEIGHT", format!("{:.0} m up", g.max_height), (g.max_height / 160.0).clamp(0.0, 1.0)),
-    ];
-    let mut ry = y;
-    for (label, value, k) in &rows {
-        text(font, label, x, ry, 13, SLATE, Align::Left);
-        let col = grade(*k);
-        if col.r == GOLD.r && col.g == GOLD.g {
-            gold_pill(big, value, x + w, ry + 1.0, 13, Align::Right, 1.0);
-        } else {
-            text(font, value, x + w, ry, 13, col, Align::Right);
-        }
-        draw_line(x, ry + 6.0, x + w, ry + 6.0, 1.0, fade(INK, 0.15));
-        ry += 20.0;
-    }
-    if !with_tip {
-        return;
-    }
-    // The tip names the weakest of the three skills; height is not a skill.
-    let weakest = rows.iter().take(3).enumerate().min_by(|a, b| a.1 .2.partial_cmp(&b.1 .2).unwrap()).map(|(i, _)| i).unwrap_or(0);
-    let tip = match weakest {
-        0 => &l.tip_push,
-        1 => &l.tip_jump,
-        _ => &l.tip_air,
-    };
-    text(font, tip, x + w / 2.0, ry + 4.0, 13, BERRY, Align::Center);
+/// "THE RED MILE" -> "The Red Mile".
+fn title_case(s: &str) -> String {
+    s.split(' ')
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().chain(c.flat_map(|ch| ch.to_lowercase())).collect::<String>(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }

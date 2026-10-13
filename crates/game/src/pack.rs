@@ -100,6 +100,11 @@ impl Pack {
         format!("packs/{}/sprites", self.name)
     }
 
+    /// The pack folder itself (pack.json, the optional city.json).
+    pub fn pack_dir(&self) -> String {
+        format!("packs/{}", self.name)
+    }
+
     /// Folder for optional sound overrides (`<name>.ogg` or `.wav`).
     pub fn sound_dir(&self) -> String {
         format!("packs/{}/sounds", self.name)

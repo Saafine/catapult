@@ -6,8 +6,12 @@
 //! deterministic given the same inputs and seed, which also makes it
 //! trivially testable.
 
+pub mod course;
 pub mod math;
+pub mod missions;
 pub mod rng;
+#[cfg(test)]
+mod rules_tests;
 
 use math::Vec2;
 use rng::Rng;
@@ -84,7 +88,11 @@ pub const FLAP_COST: f32 = 0.08;
 /// Stamina regained per second in the air.
 pub const FLAP_REGEN: f32 = 0.04;
 /// Stamina regained per present.
-pub const FLAP_PRESENT_BONUS: f32 = 0.2;
+pub const FLAP_PRESENT_BONUS: f32 = 0.12;
+/// Every present nudges the dog forward and up a little, so a chain lifts
+/// the arc. Small: with presents laid in patterns a run catches dozens, and
+/// at the old 3 m/s each they were a bigger engine than the rockets.
+pub const PRESENT_NUDGE: Vec2 = Vec2::new(1.2, 2.2);
 /// Minimum gap between wiggles, so holding the key isn't a jetpack.
 pub const FLAP_COOLDOWN: f32 = 0.16;
 /// A wiggle never pushes vertical speed above this (at lift 1).
@@ -93,10 +101,40 @@ pub const FLAP_MAX_VY: f32 = 26.0;
 /// this speed, `FLAP_LIFT_MIN` when hovering and `FLAP_LIFT_MAX` at full
 /// tilt; the kick, its cap and how fast wiggles may repeat all follow it.
 pub const FLAP_SPEED_REF: f32 = 30.0;
-pub const FLAP_LIFT_MIN: f32 = 0.6;
+/// 0.25: a stalled dog barely flutters. At 0.6 Pixie could hover in place
+/// on her ears for minutes; now a stall sinks unless something fast comes by.
+pub const FLAP_LIFT_MIN: f32 = 0.25;
 pub const FLAP_LIFT_MAX: f32 = 2.2;
+/// Ears need air: from this altitude a wiggle lifts less and less, down to
+/// `FLAP_THIN_MIN` at `FLAP_THIN_TOP`. Space is a ballistic arc you earned
+/// with boosters, and it ends as a meteor, not a climb to infinity.
+pub const FLAP_THIN_FROM: f32 = 200.0;
+pub const FLAP_THIN_TOP: f32 = 700.0;
+pub const FLAP_THIN_MIN: f32 = 0.1;
+/// Rocket thrust fades out towards this airspeed, m/s; past about
+/// 0.75 of it a new rocket no longer adds its kick either.
+pub const ROCKET_TOP_SPEED: f32 = 150.0;
 /// Every this many wiggles in one run, stamina refills: the wiggle easter egg.
 pub const WIGGLE_STREAK: u32 = 25;
+/// How much stamina the wiggle streak gives back. It used to be a full bar,
+/// which with presents made mashing an endless engine: measured, a mashing
+/// player flew twice as far as a careful one. Now it is a top-up.
+pub const WIGGLE_POWER_REFILL: f32 = 0.4;
+/// The forward part of a wiggle fades out as airspeed approaches this, so
+/// wiggles lift a fast dog but no longer push it ever faster: speed comes
+/// from the launch and from boosters, height from the ears.
+pub const FLAP_THRUST_FADE: f32 = 75.0;
+/// ...and below this airspeed a wiggle is all lift and no push (full push
+/// from twice this), so a stalled dog cannot putter along on its ears
+/// forever: measured, a careful flapper could hover at 16 m/s for minutes.
+pub const FLAP_THRUST_STALL: f32 = 12.0;
+/// A storm cloud passed this close (centre to centre, meters) without a
+/// touch is a close shave: a burst of stamina for flying the risky line.
+pub const NEAR_MISS_RANGE: f32 = 7.5;
+/// Stamina for a close shave.
+pub const NEAR_MISS_BONUS: f32 = 0.18;
+/// Presents caught within this many seconds of each other form a chain.
+pub const CHAIN_WINDOW: f32 = 1.3;
 
 /// The meteor: a long fall with no wiggling. From this fall speed the dog
 /// starts curling into a ball, and at `METEOR_FULL` it is a rolling
@@ -131,8 +169,14 @@ pub const STOMP_WINDOW: f32 = 0.22;
 pub const STOMP_REACH: f32 = 7.0;
 /// Extra restitution from a stomped landing.
 pub const STOMP_BONUS: f32 = 0.35;
-/// Crash threshold multiplier while a stomp is armed.
-pub const STOMP_CRASH_SCALE: f32 = 1.4;
+/// A stomp only springs when the dog still has this much forward pace,
+/// m/s; slower, it lands like an ordinary bounce. Skipping along the snow
+/// is a reward for speed, not a way to crawl on for ever.
+pub const STOMP_MIN_PACE: f32 = 9.0;
+/// Crash threshold multiplier while a stomp is armed. At 1.6 a well-timed
+/// stomp saves an ordinary descent (about 25 m/s) but never a meteor; at the
+/// old 1.4 the terminal fall still crashed, so the stomp almost never mattered.
+pub const STOMP_CRASH_SCALE: f32 = 1.6;
 
 /// Ground surfaces repeat in segments this long, meters.
 pub const SURFACE_SEGMENT: f32 = 45.0;
@@ -215,6 +259,10 @@ pub struct Pilot {
     pub flap_power: f32,
 }
 
+/// Balanced with `cargo run --release -p hamsters-core --example playtest -- pilots`
+/// (see `.shots/REPORT.md`): Nanook has the highest ceiling, Pixie is the
+/// most forgiving, Biscuit sits between. Pixie's drag was 0.015 and her ears
+/// 1.4, Nanook's drag 0.007, before the ear-flap rules were rebalanced.
 pub const PILOTS: [Pilot; 3] = [
     Pilot {
         name: "Biscuit",
@@ -230,7 +278,7 @@ pub const PILOTS: [Pilot; 3] = [
         name: "Nanook",
         breed: "husky",
         launch_speed: 82.0,
-        drag: 0.007,
+        drag: 0.0085,
         bounce: 0.35,
         ground_grip: 0.75,
         glide_bonus: 0.7,
@@ -240,11 +288,11 @@ pub const PILOTS: [Pilot; 3] = [
         name: "Pixie",
         breed: "chihuahua",
         launch_speed: 60.0,
-        drag: 0.015,
+        drag: 0.0115,
         bounce: 0.72,
         ground_grip: 0.92,
         glide_bonus: 1.6,
-        flap_power: 1.4,
+        flap_power: 1.5,
     },
 ];
 
@@ -350,6 +398,33 @@ pub enum Event {
     /// An altitude milestone was reached; index into [`MILESTONES`].
     Milestone(usize),
     Landed { distance: f32 },
+    /// A storm cloud passed within [`NEAR_MISS_RANGE`] without a touch.
+    CloseShave,
+    /// Order `slot` (index into [`Game::orders`]) was just completed.
+    MissionComplete(usize),
+}
+
+/// What happened in this flight, for the orders and the report card.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RunStats {
+    pub presents: u32,
+    /// The present chain running now, and the longest this flight.
+    pub chain: u32,
+    pub best_chain: u32,
+    /// Seconds left for the next present to extend the chain.
+    pub chain_timer: f32,
+    pub rockets: u32,
+    pub reindeer: u32,
+    pub chinooks: u32,
+    pub trampolines: u32,
+    pub sleighs: u32,
+    pub storms_hit: u32,
+    /// Storm clouds flown past (within 20 m of height) without a touch.
+    pub storms_passed: u32,
+    pub close_shaves: u32,
+    /// Stomped landings that bounced back up.
+    pub stomps: u32,
+    pub meteor: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -396,6 +471,14 @@ pub struct Game {
     pub milestone: Option<usize>,
     /// Where a sweet-spot launch first touches down: the landing-zone marker.
     pub landing_x: f32,
+    /// This flight's tallies; see [`RunStats`].
+    pub stats: RunStats,
+    /// The three active flight orders, set by the runtime before launch.
+    pub orders: [Option<missions::Goal>; 3],
+    /// Which of the orders this flight has completed.
+    pub orders_done: [bool; 3],
+    /// Pattern spawner state; see [`course`].
+    pub course: course::CourseState,
     pub events: Vec<Event>,
     rng: Rng,
     /// x coordinate up to which entities have been spawned.
@@ -463,6 +546,10 @@ impl Game {
             fall_time: 0.0,
             milestone: None,
             landing_x: 60.0,
+            stats: RunStats::default(),
+            orders: [None; 3],
+            orders_done: [false; 3],
+            course: course::CourseState::default(),
             events: Vec::new(),
             rng: Rng::new(seed),
             spawned_to: 82.0,
@@ -477,10 +564,30 @@ impl Game {
     /// Start a new run with the same pilot, keeping the best distance.
     pub fn reset(&mut self) {
         let best = self.best_distance;
+        let orders = self.orders;
         self.seed = self.seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
         *self = Game::new(self.pilot, self.seed);
         self.best_distance = best;
+        self.orders = orders;
         self.crashed = false;
+    }
+
+    /// Set the active orders for the coming flight; clears their ticks.
+    pub fn set_orders(&mut self, orders: [Option<missions::Goal>; 3]) {
+        self.orders = orders;
+        self.orders_done = [false; 3];
+    }
+
+    /// Tick off any order the flight has just satisfied.
+    fn check_orders(&mut self) {
+        for i in 0..3 {
+            if let (Some(goal), false) = (self.orders[i], self.orders_done[i]) {
+                if missions::progress(goal, self).done {
+                    self.orders_done[i] = true;
+                    self.events.push(Event::MissionComplete(i));
+                }
+            }
+        }
     }
 
     pub fn set_pilot(&mut self, pilot: Pilot) {
@@ -633,19 +740,24 @@ impl Game {
         {
             return;
         }
-        let p = self.pilot.flap_power * self.flap_lift();
+        let thin = 1.0 - (1.0 - FLAP_THIN_MIN) * ((self.altitude() - FLAP_THIN_FROM) / (FLAP_THIN_TOP - FLAP_THIN_FROM)).clamp(0.0, 1.0);
+        let p = self.pilot.flap_power * self.flap_lift() * thin;
         let boosted = self.vel.y + FLAP_IMPULSE * p;
         self.vel.y = boosted.min(self.vel.y.max(FLAP_MAX_VY * self.flap_lift()));
-        self.vel.x += FLAP_FORWARD * p;
+        // The forward kick fades with airspeed: ears lift, boosters push.
+        let speed = self.vel.length();
+        let thrust = ((speed - FLAP_THRUST_STALL) / FLAP_THRUST_STALL).clamp(0.0, 1.0) * (1.0 - speed / FLAP_THRUST_FADE).clamp(0.0, 1.0);
+        self.vel.x += FLAP_FORWARD * p * thrust;
         self.stamina -= FLAP_COST;
         // Faster air, quicker wiggles.
         self.flap_cooldown = FLAP_COOLDOWN / self.flap_lift().max(1.0);
         // A wiggle is not free fall: the meteor clock starts over.
         self.fall_time = 0.0;
         self.flaps += 1;
+        self.course.flap_rate += 1.0 / course::FLAP_RATE_WINDOW;
         self.events.push(Event::Flap);
         if self.flaps % WIGGLE_STREAK == 0 {
-            self.stamina = 1.0;
+            self.stamina = (self.stamina + WIGGLE_POWER_REFILL).min(1.0);
             self.vel.y = self.vel.y.max(0.0) + 8.0 * p;
             self.events.push(Event::WigglePower);
         }
@@ -703,6 +815,12 @@ impl Game {
 
     fn step_flight(&mut self, dt: f32) {
         self.flight_time += dt;
+        self.stats.chain_timer = (self.stats.chain_timer - dt).max(0.0);
+        self.course.flap_rate *= (1.0 - dt / course::FLAP_RATE_WINDOW).max(0.0);
+        if self.stats.chain_timer <= 0.0 {
+            self.stats.chain = 0;
+        }
+        let x_before = self.pos.x;
         self.flap_cooldown = (self.flap_cooldown - dt).max(0.0);
         self.stomp = (self.stomp - dt).max(0.0);
         if self.frozen > 0.0 {
@@ -723,8 +841,9 @@ impl Game {
         let g_scale = if self.glide > 0.0 { GLIDE_GRAVITY_SCALE } else { 1.0 };
         self.vel.y -= GRAVITY * g_scale * (1.0 + DIVE_PULL * dive) * dt;
         if self.rocket > 0.0 {
-            self.vel.x += 60.0 * dt;
-            self.vel.y += 12.0 * dt;
+            let fade = (1.0 - self.vel.length() / ROCKET_TOP_SPEED).clamp(0.0, 1.0);
+            self.vel.x += 60.0 * fade * dt;
+            self.vel.y += 12.0 * fade * dt;
             self.rocket -= dt;
         }
         if self.glide > 0.0 {
@@ -742,6 +861,7 @@ impl Game {
         let m = self.meteor();
         if m >= 0.5 && !self.was_meteor {
             self.was_meteor = true;
+            self.stats.meteor = true;
             self.events.push(Event::Meteor);
         } else if m <= 0.0 {
             self.was_meteor = false;
@@ -768,6 +888,7 @@ impl Game {
                 let impact = -self.vel.y;
                 let soft = self.entities.iter().any(|e| e.alive && e.kind == EntityKind::Trampoline && (e.pos.x - self.pos.x).abs() < 3.5);
                 let armed = self.stomp > 0.0;
+                let spring = armed && self.vel.x >= STOMP_MIN_PACE;
                 let mut crash_at = CRASH_SPEED;
                 if armed {
                     crash_at *= STOMP_CRASH_SCALE;
@@ -784,17 +905,18 @@ impl Game {
                     self.best_distance = self.best_distance.max(d);
                     self.events.push(Event::Crashed { speed: impact });
                     self.events.push(Event::Landed { distance: d });
+                    self.check_orders();
                     return;
                 }
                 let mut restitution = self.pilot.bounce;
-                if armed {
+                if spring {
                     restitution = (restitution + STOMP_BONUS).min(0.95);
                 }
                 if surface == Surface::Drift {
                     restitution *= 0.4;
                 }
                 self.vel.y = impact * restitution;
-                let grip = match (armed, surface) {
+                let grip = match (spring, surface) {
                     (true, _) => 1.0,
                     (false, Surface::Ice) => 0.99,
                     (false, _) => self.pilot.ground_grip,
@@ -804,7 +926,10 @@ impl Game {
                 if self.vel.y < 2.0 {
                     self.vel.y = 0.0;
                 } else {
-                    self.events.push(Event::GroundBounce { speed: impact, stomped: armed });
+                    if spring && impact > 8.0 {
+                        self.stats.stomps += 1;
+                    }
+                    self.events.push(Event::GroundBounce { speed: impact, stomped: spring });
                 }
             }
             if self.vel.y == 0.0 {
@@ -816,6 +941,7 @@ impl Game {
                     let d = self.distance();
                     self.best_distance = self.best_distance.max(d);
                     self.events.push(Event::Landed { distance: d });
+                    self.check_orders();
                     return;
                 }
             }
@@ -840,12 +966,47 @@ impl Game {
             }
         }
 
+        // Storm clouds flown past this step: a pass, and a close shave if near.
+        let (x1, y1) = (self.pos.x, self.pos.y);
+        let mut shaves = 0;
+        for e in self.entities.iter().filter(|e| e.alive && e.kind == EntityKind::Stormcloud && e.pos.x > x_before && e.pos.x <= x1) {
+            let dy = (e.pos.y - y1).abs();
+            if dy < 20.0 {
+                self.stats.storms_passed += 1;
+            }
+            if dy < NEAR_MISS_RANGE {
+                shaves += 1;
+            }
+        }
+        for _ in 0..shaves {
+            self.stats.close_shaves += 1;
+            self.stamina = (self.stamina + NEAR_MISS_BONUS).min(1.0);
+            self.events.push(Event::CloseShave);
+        }
+
         self.spawn_ahead();
         let cutoff = self.pos.x - 80.0;
         self.entities.retain(|e| e.pos.x > cutoff);
+        self.check_orders();
     }
 
     fn apply_hit(&mut self, kind: EntityKind) {
+        let st = &mut self.stats;
+        match kind {
+            EntityKind::Present => {
+                st.presents += 1;
+                st.chain = if st.chain_timer > 0.0 { st.chain + 1 } else { 1 };
+                st.chain_timer = CHAIN_WINDOW;
+                st.best_chain = st.best_chain.max(st.chain);
+            }
+            EntityKind::Firework => st.rockets += 1,
+            EntityKind::Reindeer => st.reindeer += 1,
+            EntityKind::Updraft => st.chinooks += 1,
+            EntityKind::Trampoline => st.trampolines += 1,
+            EntityKind::Sleigh | EntityKind::Ufo => st.sleighs += 1,
+            EntityKind::Stormcloud => st.storms_hit += 1,
+            EntityKind::Wings | EntityKind::ColdWind => {}
+        }
         match kind {
             EntityKind::Trampoline => {
                 self.vel.y = self.vel.y.abs().max(24.0) + 22.0;
@@ -861,15 +1022,17 @@ impl Game {
             }
             EntityKind::Firework => {
                 self.rocket = 1.2;
-                self.vel.x += 30.0;
+                // The full kick up to 0.35 of the top speed, none from 0.75 of it.
+                let kick = ((ROCKET_TOP_SPEED * 0.75 - self.vel.length()) / (ROCKET_TOP_SPEED * 0.4)).clamp(0.0, 1.0);
+                self.vel.x += 30.0 * kick;
             }
             EntityKind::Present => {
                 self.presents += 1;
                 self.stamina = (self.stamina + FLAP_PRESENT_BONUS).min(1.0);
                 // A small nudge forward and up: every present is a little boost,
                 // so a chain lifts the whole arc.
-                self.vel.x += 3.0;
-                self.vel.y += 3.5;
+                self.vel.x += PRESENT_NUDGE.x;
+                self.vel.y += PRESENT_NUDGE.y;
             }
             EntityKind::Sleigh => {
                 self.vel.x += 30.0;
@@ -918,9 +1081,14 @@ impl Game {
         }
     }
 
-    /// The opening every run is laid on the arc a typical launch actually
-    /// flies (sweet-spot push, 45 degree jump), so a first run is guaranteed
-    /// to catch presents, a reindeer and wings before the first landing.
+    /// The opening is the launch relay, laid on the flight a sweet-spot
+    /// push and a perfect jump actually fly, hits included: presents off the
+    /// lip, a rocket at the top of the arc, presents along the line the
+    /// rocket really throws the dog on, a reindeer, and more presents after
+    /// it. A clean launch rides the whole relay into town; a sloppy one
+    /// passes under the rocket (a couple of wiggles can still reach it) and
+    /// meets the city with less speed. Course boosters only start where the
+    /// relay ends, so the launch is what decides how a flight begins.
     fn opening_chain(&mut self) {
         let path = self.median_arc();
         let at = |x: f32| -> Vec2 {
@@ -932,32 +1100,62 @@ impl Game {
             }
             best
         };
-        // Where the median arc meets the ground; everything is placed as a
-        // fraction of that so it stays on the arc for every pilot.
+        // Where the plain arc meets the ground: the landing-zone marker.
         let landing = path.iter().find(|p| p.y < 2.0 && p.x > 20.0).map(|p| p.x).unwrap_or(80.0);
         self.landing_x = landing;
-        let mut push = |kind: EntityKind, pos: Vec2| {
-            self.entities.push(Entity { kind, pos, alive: true, dead_for: 0.0 });
+        let push = |g: &mut Game, kind: EntityKind, pos: Vec2| {
+            g.entities.push(Entity { kind, pos, alive: true, dead_for: 0.0 });
         };
-        // A short rising arc right off the lip so the very first frame of
-        // flight already shows something to wiggle for.
+        // Something to wiggle for on the very first frame of flight.
         for k in 0..3 {
             let p = at(14.0 + k as f32 * 3.0);
-            push(EntityKind::Present, Vec2::new(p.x, p.y + 2.2 + k as f32 * 0.6));
+            push(self, EntityKind::Present, Vec2::new(p.x, p.y + 2.2 + k as f32 * 0.6));
         }
         for k in 0..5 {
-            let p = at(landing * (0.40 + k as f32 * 0.035));
-            push(EntityKind::Present, Vec2::new(p.x, p.y + 0.3));
+            let p = at(landing * (0.28 + k as f32 * 0.035));
+            push(self, EntityKind::Present, Vec2::new(p.x, p.y + 0.3));
         }
-        push(EntityKind::Reindeer, at(landing * 0.6));
-        for k in 0..4 {
-            let p = at(landing * (0.72 + k as f32 * 0.03));
-            push(EntityKind::Present, Vec2::new(p.x, p.y + 0.3));
+        // Fly the relay with what is laid so far (the presents nudge the
+        // line up), then lay the next leg on the line that flight takes.
+        let leg = |g: &Game, secs: f32| -> Vec<(f32, Vec2)> {
+            let mut sim = lip_sim(g.pilot, 0.85, 1.0);
+            sim.entities = g.entities.clone();
+            let mut out = Vec::new();
+            let mut t = 0.0;
+            while sim.phase == Phase::Flying && t < secs {
+                sim.step(1.0 / 120.0);
+                t += 1.0 / 120.0;
+                out.push((t, sim.pos));
+            }
+            out
+        };
+        let when = |trail: &[(f32, Vec2)], t: f32| trail.iter().find(|(tt, _)| *tt >= t).or(trail.last()).map(|(_, p)| *p).unwrap_or(LIP);
+        // The rocket sits on the top of a perfect launch.
+        let first = leg(self, 8.0);
+        let (t_apex, apex) = first.iter().fold((0.0, LIP), |m, (t, p)| if p.y > m.1.y { (*t, *p) } else { m });
+        push(self, EntityKind::Firework, Vec2::new(apex.x, apex.y + 0.3));
+        let trail = leg(self, t_apex + 3.5);
+        for k in 0..6 {
+            let p = when(&trail, t_apex + 0.35 + k as f32 * 0.16);
+            push(self, EntityKind::Present, Vec2::new(p.x, p.y + 0.4));
         }
-        // A rocket above the arc's peak: the first flight's big moment.
-        let peak = at(landing * 0.5);
-        push(EntityKind::Firework, Vec2::new(peak.x, peak.y + 3.5));
-        push(EntityKind::Trampoline, Vec2::new(landing + 3.0, EntityKind::Trampoline.radius() * 0.6));
+        let t_deer = t_apex + 1.9;
+        let trail = leg(self, t_deer + 0.5);
+        let deer = when(&trail, t_deer);
+        push(self, EntityKind::Reindeer, Vec2::new(deer.x, deer.y + 0.3));
+        let trail = leg(self, t_deer + 3.0);
+        for k in 0..5 {
+            let p = when(&trail, t_deer + 0.5 + k as f32 * 0.18);
+            push(self, EntityKind::Present, Vec2::new(p.x, p.y + 0.4));
+        }
+        let end = when(&trail, t_deer + 1.6);
+        self.course.relay_line = leg(self, t_deer + 3.0).iter().step_by(4).map(|(_, p)| *p).collect();
+        // The street under the plain arc's landing gets a trampoline: a
+        // short launch still has a way back up.
+        push(self, EntityKind::Trampoline, Vec2::new(landing + 3.0, EntityKind::Trampoline.radius() * 0.6));
+        self.course.boost_from = end.x.max(landing + 10.0);
+        // The relay's line belongs to the relay: over its stretch the course
+        // only lays caches high above the line (see `course::weights`).
     }
 
     /// The arc a typical launch flies: sweet-spot push, perfect jump.
@@ -965,145 +1163,10 @@ impl Game {
         predict_arc(self.pilot, 0.85, 1.0)
     }
 
-    /// Where the dog will be, in height, when it reaches `x` on a plain
-    /// ballistic arc from its current state; only meaningful while flying.
-    fn projected_y(&self, x: f32) -> f32 {
-        if self.phase != Phase::Flying || self.vel.x < 3.0 {
-            return 22.0;
-        }
-        let t = ((x - self.pos.x) / self.vel.x).max(0.0);
-        let g = if self.glide > 0.0 { GRAVITY * GLIDE_GRAVITY_SCALE } else { GRAVITY };
-        self.pos.y + self.vel.y * t - 0.5 * g * t * t
-    }
-
+    /// Keep the course laid out ahead of the dog: beats of hand-authored
+    /// patterns, see [`course`].
     fn spawn_ahead(&mut self) {
-        fn x_far(x: f32) -> f32 {
-            (x - 80.0).max(0.0)
-        }
-        let target = self.pos.x + SPAWN_LOOKAHEAD;
-        while self.spawned_to < target {
-            // Pickups thin out with distance while storm clouds thicken.
-            let gap = self.rng.range(4.0, 11.0) * (1.0 + (x_far(self.spawned_to)) / 700.0);
-            self.spawned_to += gap;
-            let x = self.spawned_to;
-            let roll = self.rng.unit();
-            // No angel wings: rockets take their share. Cold winds only
-            // past 120 m, once the player has the flap under control.
-            let cold = x > 120.0 && roll >= 0.93;
-            let kind = if cold {
-                EntityKind::ColdWind
-            } else if roll < 0.24 {
-                EntityKind::Present
-            } else if roll < 0.44 {
-                EntityKind::Reindeer
-            } else if roll < 0.56 {
-                EntityKind::Trampoline
-            } else if roll < 0.84 {
-                // Fireworks are the crowd-pleaser: the biggest share after presents.
-                EntityKind::Firework
-            } else {
-                EntityKind::Updraft
-            };
-            let sky = |rng: &mut Rng, lo: f32, hi: f32| {
-                let u = rng.unit();
-                lo + (hi - lo) * u * u
-            };
-            // Alternate slots between the low band (rolling, bouncing) and the
-            // mid band (flying), so every screen has something in reach.
-            // Three bands cycle by slot: low (rolling, bouncing), mid (the
-            // usual arc) and high (what flapping and boosts can reach), so
-            // the sky above the flight line is never empty.
-            let slot = ((x / 10.0) as i32).rem_euclid(3);
-            let (mid_slot, high_slot) = (slot == 0, slot == 2);
-            let y = match kind {
-                EntityKind::Trampoline => EntityKind::Trampoline.radius() * 0.6,
-                EntityKind::Reindeer => if high_slot { self.rng.range(50.0, 110.0) } else if mid_slot { self.rng.range(14.0, 48.0) } else { sky(&mut self.rng, 5.0, 90.0) },
-                EntityKind::Wings => if high_slot { self.rng.range(45.0, 100.0) } else if mid_slot { self.rng.range(12.0, 40.0) } else { sky(&mut self.rng, 5.0, 70.0) },
-                EntityKind::Firework => if high_slot { self.rng.range(40.0, 90.0) } else if mid_slot { self.rng.range(10.0, 36.0) } else { sky(&mut self.rng, 4.0, 60.0) },
-                EntityKind::Present => if mid_slot { self.rng.range(10.0, 40.0) } else { sky(&mut self.rng, 3.0, 80.0) },
-                EntityKind::Updraft => if high_slot { self.rng.range(40.0, 120.0) } else { self.rng.range(12.0, 50.0) },
-                EntityKind::ColdWind => self.projected_y(x + 2.0).clamp(10.0, 300.0) + self.rng.range(-4.0, 4.0),
-                _ => 0.0,
-            };
-            self.entities.push(Entity { kind, pos: Vec2::new(x, y), alive: true, dead_for: 0.0 });
-            // Every third rocket comes as a fan of three, climbing to the right.
-            if kind == EntityKind::Firework && self.rng.unit() < 0.35 {
-                for k in 1..3 {
-                    let kf = k as f32;
-                    self.entities.push(Entity { kind, pos: Vec2::new(x + kf * 3.2, y + kf * 2.4), alive: true, dead_for: 0.0 });
-                }
-            }
-            if kind == EntityKind::Present {
-                let n = self.rng.range_i(2, 5);
-                for k in 1..=n {
-                    let fx = x + k as f32 * 2.2;
-                    let fy = y + (k as f32 * 0.9).sin() * 2.0;
-                    self.entities.push(Entity { kind, pos: Vec2::new(fx, fy), alive: true, dead_for: 0.0 });
-                }
-            }
-            // Past the opening, every other slot also drops a present in the
-            // flight band so the descent is never empty.
-            // A present high above the arc every third slot: bait for flappers.
-            if x > 82.0 && high_slot {
-                let y = if self.phase == Phase::Flying { (self.projected_y(x + 1.0) + self.rng.range(12.0, 30.0)).clamp(30.0, 400.0) } else { self.rng.range(45.0, 90.0) };
-                self.entities.push(Entity { kind: EntityKind::Present, pos: Vec2::new(x + 1.0, y), alive: true, dead_for: 0.0 });
-            }
-            if x > 82.0 && self.rng.unit() < 0.9 {
-                // Ladder just above the projected arc: reachable only by wiggling,
-                // so the player learns "wiggle = reach" by wanting.
-                let y = if self.phase == Phase::Flying { (self.projected_y(x + 3.0) + 2.5).clamp(6.0, 400.0) } else { self.rng.range(12.0, 40.0) };
-                self.entities.push(Entity { kind: EntityKind::Present, pos: Vec2::new(x + 3.0, y + self.rng.range(-3.0, 3.0)), alive: true, dead_for: 0.0 });
-                // Sometimes a short arc of three so the corridor has a line to chase.
-                if self.rng.unit() < 0.4 {
-                    for k in 1..3 {
-                        let kf = k as f32;
-                        self.entities.push(Entity { kind: EntityKind::Present, pos: Vec2::new(x + 3.0 + kf * 2.6, y + kf * 1.4), alive: true, dead_for: 0.0 });
-                    }
-                }
-            }
-            self.separate_presents_from_storms();
-            // Storm clouds start around 80 m, roughly one per screen, and
-            // get denser with distance.
-            // Distance bands: the first 100 m is clean, then one cloud at a
-            // time, then pairs and denser fields past 250 m.
-            let storm_p = if x < 70.0 {
-                0.0
-            } else if x < 250.0 {
-                0.22
-            } else {
-                (0.34 + (x - 250.0) / 500.0).min(0.7)
-            };
-            // Never more than 150 m without a storm in the flight band.
-            let overdue = x > 70.0 && x - self.last_storm_x > 120.0;
-            if self.rng.unit() < storm_p || overdue {
-                self.last_storm_x = x;
-                // On the arc the dog is projected to fly: integrate the current
-                // velocity forward to the cloud's x.
-                // A corridor around where the dog is heading in the next second or two.
-                // Half the clouds sit on the arc the dog is flying (the dodge);
-                // the rest are scattered through the sky so no altitude is
-                // ever the one storm band.
-                let on_path = self.phase == Phase::Flying && self.rng.unit() < 0.5;
-                let y = if on_path {
-                    self.projected_y(x + 2.0).clamp(8.0, STORM_CEILING) + self.rng.range(-8.0, 8.0)
-                } else {
-                    let u = self.rng.unit();
-                    8.0 + (STORM_CEILING - 8.0) * u * u
-                };
-                self.entities.push(Entity { kind: EntityKind::Stormcloud, pos: Vec2::new(x + 2.0, y), alive: true, dead_for: 0.0 });
-            }
-            // Rare high-altitude helpers: the sleigh cruises the upper sky,
-            // the UFO only appears in space.
-            if self.rng.unit() < 0.10 {
-                let y = self.rng.range(90.0, 300.0);
-                self.entities.push(Entity { kind: EntityKind::Sleigh, pos: Vec2::new(x + 3.0, y), alive: true, dead_for: 0.0 });
-            }
-            if self.rng.unit() < 0.12 {
-                let y = self.rng.range(SPACE_ALTITUDE + 20.0, SPACE_ALTITUDE + 400.0);
-                self.entities.push(Entity { kind: EntityKind::Ufo, pos: Vec2::new(x + 5.0, y), alive: true, dead_for: 0.0 });
-            }
-            self.separate_presents_from_storms();
-        }
+        self.lay_course();
     }
 }
 
@@ -1111,7 +1174,28 @@ impl Game {
 /// empty world, one sample per 2 m of travel, ending where the pilot lands.
 /// This is what the aim arc draws and what the opening chain is laid on.
 pub fn predict_arc(pilot: Pilot, power: f32, quality: f32) -> Vec<Vec2> {
-    let mut g = Game {
+    let mut g = lip_sim(pilot, power, quality);
+    let mut out = vec![g.pos];
+    let mut steps = 0;
+    while g.phase == Phase::Flying && steps < 3000 {
+        g.step(1.0 / 60.0);
+        steps += 1;
+        if g.pos.x - out.last().unwrap().x >= 2.0 {
+            out.push(g.pos);
+        }
+        // Stop at the first touchdown: the arc ends where the dog lands.
+        if g.pos.y <= PILOT_RADIUS + 1e-3 && g.vel.y <= 0.0 {
+            break;
+        }
+    }
+    out.push(Vec2::new(g.pos.x, PILOT_RADIUS));
+    out
+}
+
+/// A dog just leaving the lip with the velocity a push `power` and jump
+/// `quality` earn, in a world that never spawns anything by itself.
+fn lip_sim(pilot: Pilot, power: f32, quality: f32) -> Game {
+    Game {
         pilot,
         phase: Phase::Flying,
         pos: Vec2::new(LIP.x, LIP.y + PILOT_RADIUS),
@@ -1133,6 +1217,10 @@ pub fn predict_arc(pilot: Pilot, power: f32, quality: f32) -> Vec<Vec2> {
         best_distance: 0.0,
         milestone: None,
         landing_x: 0.0,
+        stats: RunStats::default(),
+        orders: [None; 3],
+        orders_done: [false; 3],
+        course: course::CourseState::default(),
         events: Vec::new(),
         rng: Rng::new(1),
         spawned_to: 1.0e9,
@@ -1142,22 +1230,7 @@ pub fn predict_arc(pilot: Pilot, power: f32, quality: f32) -> Vec<Vec2> {
             botched: false,
             was_meteor: false,
             fall_time: 0.0,
-    };
-    let mut out = vec![g.pos];
-    let mut steps = 0;
-    while g.phase == Phase::Flying && steps < 3000 {
-        g.step(1.0 / 60.0);
-        steps += 1;
-        if g.pos.x - out.last().unwrap().x >= 2.0 {
-            out.push(g.pos);
-        }
-        // Stop at the first touchdown: the arc ends where the dog lands.
-        if g.pos.y <= PILOT_RADIUS + 1e-3 && g.vel.y <= 0.0 {
-            break;
-        }
     }
-    out.push(Vec2::new(g.pos.x, PILOT_RADIUS));
-    out
 }
 
 #[cfg(test)]
@@ -1357,19 +1430,26 @@ mod tests {
     fn world_is_populated_at_all_heights() {
         let mut g = Game::new(PILOTS[0], 5);
         let opening: Vec<_> = g.entities.iter().take(10).cloned().collect();
-        // Fly a typical arc so the spawner runs ahead of the dog.
+        // Cruise through town past the launch relay so the course lays ahead.
         g.phase = Phase::Flying;
-        g.pos = Vec2::new(LIP.x, LIP.y + 1.0);
-        g.vel = Vec2::new(30.0, 18.0);
-        for _ in 0..(6 * 60) {
+        g.entities.clear();
+        g.spawned_to = 300.0;
+        g.pos = Vec2::new(300.0, 30.0);
+        g.vel = Vec2::new(30.0, 12.0);
+        g.course.boost_t0 = Some(0.0);
+        for _ in 0..(3 * 60) {
             g.step(1.0 / 60.0);
         }
         let n = g.entities.len();
         assert!(n >= 20, "only {n} entities after six seconds of flight");
-        let low = g.entities.iter().filter(|e| e.pos.y < 15.0).count();
-        let mid = g.entities.iter().filter(|e| e.pos.y >= 15.0 && e.pos.y < 60.0).count();
-        assert!(low >= 3, "low band has {low}");
-        assert!(mid >= 3, "mid band has {mid}");
+        // The course is laid relative to the line the dog flies: things on
+        // that line to catch, and the sky above it never empty.
+        let line = course::project_line(g.pos, g.vel, g.pilot.drag, 0.0, 0.0, 3.0);
+        let ahead: Vec<_> = g.entities.iter().filter(|e| e.alive && e.pos.x > g.pos.x - 5.0).collect();
+        let on = ahead.iter().filter(|e| (e.pos.y - course::line_y(&line, e.pos.x)).abs() < 12.0).count();
+        let above = ahead.iter().filter(|e| e.pos.y - course::line_y(&line, e.pos.x) >= 12.0).count();
+        assert!(on >= 3, "on the line: {on}");
+        assert!(above >= 2, "above the line: {above}");
         let g = Game { entities: opening, ..g };
         // The opening chain is always there and sits on the arc, off the ground.
         // Ten airborne pickups come before the trampoline on the ground.

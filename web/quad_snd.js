@@ -6,6 +6,38 @@ let sounds = new Map();
 let playbacks = [];
 let sound_key_next = 1;
 let playback_key_next = 1;
+// Master bus (Santa's Flight School): every playback feeds master_in,
+// then a limiter (a fast, near-hard-knee compressor at -6 dBFS,
+// ratio 20) so a crash, fireworks and music together never clip. Loop
+// and music volumes glide (setTargetAtTime) instead of stepping per frame,
+// which used to zipper.
+let master_in = null;
+let master_limiter = null;
+
+function master_bus() {
+    if (master_in == null) {
+        master_in = audio_context.createGain();
+        master_in.gain.value = 0.9;
+        master_limiter = audio_context.createDynamicsCompressor();
+        master_limiter.threshold.value = -6;
+        master_limiter.knee.value = 4;
+        master_limiter.ratio.value = 20;
+        master_limiter.attack.value = 0.002;
+        master_limiter.release.value = 0.16;
+        master_in.connect(master_limiter);
+        master_limiter.connect(audio_context.destination);
+    }
+    return master_in;
+}
+
+function glide_gain(node, volume) {
+    try {
+        node.gain.cancelScheduledValues(audio_context.currentTime);
+        node.gain.setTargetAtTime(volume, audio_context.currentTime, 0.02);
+    } catch (e) {
+        node.gain.value = volume;
+    }
+}
 
 function audio_init() {
     if (audio_context == null) {
@@ -123,8 +155,9 @@ function audio_play_buffer(sound_key, volume, repeat) {
     pb.playback_key = playback_key;
 
     pb.source.connect(pb.gain_node);
-    pb.gain_node.connect(audio_context.destination);
+    pb.gain_node.connect(master_bus());
 
+    pb.gain_node.gain.cancelScheduledValues(0);
     pb.gain_node.gain.value = volume;
     pb.source.loop = repeat;
 
@@ -146,7 +179,7 @@ function audio_play_buffer(sound_key, volume, repeat) {
 function audio_source_set_volume(sound_key, volume) {
     playbacks.forEach(playback => {
         if (playback.sound_key === sound_key) {
-            playback.gain_node.gain.value = volume;
+            glide_gain(playback.gain_node, volume);
         }
     });
 }
@@ -173,7 +206,7 @@ function audio_playback_set_volume(playback_key, volume) {
     let playback = playbacks.find(playback => playback.playback_key === playback_key);
 
     if (playback != null) {
-        playback.gain_node.gain.value = volume;
+        glide_gain(playback.gain_node, volume);
     }
 }
 

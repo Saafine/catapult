@@ -88,7 +88,13 @@ function init_webgl(version) {
             alert("Cant initialize WEBGL_depth_texture extension");
         }
     } else {
-        gl = canvas.getContext("webgl2");
+        // WebGL2 when the browser has it (mipmaps for any texture size),
+        // else fall back to WebGL1. "?webgl1" in the URL forces the fallback.
+        gl = /[?&]webgl1\b/.test(location.search) ? null : canvas.getContext("webgl2");
+        if (!gl) {
+            init_webgl(1);
+            return;
+        }
     }
     if (gl === null) {
         alert("Unable to initialize WebGL. Your browser or machine may not support it.");

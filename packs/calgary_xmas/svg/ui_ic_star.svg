@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" data-paint="skip"><defs><filter id="grain" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+<feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" seed="7" result="fine"/>
+<feTurbulence type="fractalNoise" baseFrequency="0.5625" numOctaves="3" seed="3" result="soft"/>
+<feColorMatrix in="fine" type="matrix" result="fg" values="0.16 0 0 0 0.42  0.16 0 0 0 0.42  0.16 0 0 0 0.42  0 0 0 0 1"/>
+<feColorMatrix in="soft" type="matrix" result="sg" values="0.3 0 0 0 0.35  0.3 0 0 0 0.35  0.3 0 0 0 0.35  0 0 0 0 1"/>
+<feComposite in="fg" in2="sg" operator="arithmetic" k1="0" k2="0.5" k3="0.5" k4="0" result="noise"/>
+<feComposite in="noise" in2="SourceAlpha" operator="in" result="masked"/>
+<feBlend in="masked" in2="SourceGraphic" mode="soft-light" result="lit"/>
+<feComposite in="lit" in2="SourceAlpha" operator="in"/></filter><radialGradient id="gS" cx="0.4" cy="0.3" r="0.8"><stop offset="0" stop-color="#fff1a6"/><stop offset="0.5" stop-color="#f9c846"/><stop offset="1" stop-color="#d48a1c"/></radialGradient><filter id="ish" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="1.6"/></filter></defs><g filter="url(#grain)"><polygon points="32.0,8.0 39.1,25.3 57.7,26.7 43.4,38.7 47.9,56.8 32.0,47.0 16.1,56.8 20.6,38.7 6.3,26.7 24.9,25.3" fill="#1d2a4a" opacity="0.3" filter="url(#ish)"/><polygon points="32.0,5.0 39.1,22.3 57.7,23.7 43.4,35.7 47.9,53.8 32.0,44.0 16.1,53.8 20.6,35.7 6.3,23.7 24.9,22.3" fill="url(#gS)" stroke="#8a520c" stroke-width="3" stroke-linejoin="round"/><ellipse cx="25" cy="24" rx="6" ry="3.5" fill="#ffffff" opacity="0.7" transform="rotate(-30 25 24)"/></g></svg>

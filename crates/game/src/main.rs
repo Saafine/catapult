@@ -7,13 +7,22 @@
 use hamsters_core::{predict_arc, EntityKind, Event, Game, Phase, LIP, PILOTS, PILOT_RADIUS, RAMP_TOP};
 use macroquad::prelude::*;
 
+mod anim;
+mod city;
 mod draw;
 mod hud;
+mod orders;
 mod pack;
 mod particles;
+mod post;
+mod props;
 mod sfx;
 mod sprites;
+mod fxtex;
+mod vfx;
+mod ui;
 
+use city::City;
 use draw::lerp;
 use pack::Pack;
 use serde::{Deserialize, Serialize};
@@ -26,7 +35,7 @@ pub const PPM: f32 = 30.0;
 const FIXED_DT: f32 = 1.0 / 120.0;
 
 fn window_conf() -> Conf {
-    Conf { window_title: "Santa's Flight School".to_owned(), window_width: 1024, window_height: 576, high_dpi: true, ..Default::default() }
+    Conf { window_title: "Santa's Flight School".to_owned(), window_width: 1024, window_height: 576, high_dpi: true, sample_count: 4, platform: post::platform(), ..Default::default() }
 }
 
 /// Camera that frames the tower while aiming, follows the sled down the ramp,
@@ -44,6 +53,13 @@ pub struct Cam {
     /// 0..1 how close the ground is in time while falling; drives the
     /// punch-in before impact.
     pub near: f32,
+    /// The PERFECT-jump beat: 1 at the lip, decays in game time. Punches in
+    /// on the dog and centres it while the world slows down.
+    pub beat: f32,
+    /// Game-time clock for the shake noise, so shakes slow down in slow motion.
+    pub shake_clock: f32,
+    /// 0..1 how excited the bystanders are (set by the app each frame).
+    pub cheer: f32,
 }
 
 /// Seconds the pre-launch look-back glides from the target flag to the tower.
@@ -83,11 +99,15 @@ impl Cam {
                 let s = PPM * zoom;
                 (g.pos.x + if g.crashed { 0.3 } else { 2.0 }, if g.crashed { 0.30 * sh / s } else { 0.42 * sh / s }, zoom, 0.0)
             }
-            Phase::Sliding { .. } => {
-                // Tight on the sled: the dog fills about a fifth of the frame.
-                let zoom = 1.15;
+            Phase::Sliding { t, .. } => {
+                // Tight on the sled, and pushing in over the last stretch so
+                // the lip arrives with tension: the dog grows in the frame as
+                // the take-off comes up, with lead room ahead of it.
+                let k = t.clamp(0.0, 1.0);
+                let push = k * k * (3.0 - 2.0 * k);
+                let zoom = 1.1 + 0.28 * push;
                 let s = PPM * zoom;
-                (g.pos.x + 0.14 * sw / s, (0.30 * sh / s + 1.0).max(g.pos.y - 0.02 * sh / s), zoom, 0.0)
+                (g.pos.x + (0.14 - 0.03 * push) * sw / s, (0.30 * sh / s + 1.0).max(g.pos.y - (0.02 + 0.02 * push) * sh / s), zoom, 0.0)
             }
             _ => {
                 let speed = lead.length();
@@ -119,19 +139,21 @@ impl Cam {
                 let base_y = 0.36 * sh / s;
                 // During the hold the dog sits about a third from the top;
                 // afterwards the camera follows altitude loosely so the arc shows.
-                let tight_y = g.pos.y - 0.02 * sh / s;
+                let tight_y = g.pos.y + 0.05 * sh / s;
                 // Vertical lead: while climbing the dog sits low in the frame
                 // (48% from the top) so the sky ahead shows; while falling it
                 // rides high (30%) so the ground ahead shows.
-                let frac = 0.40 + (lead.y / 12.0).clamp(-1.0, 1.0) * 0.10;
+                // Kept under the banner slot (24% from the top) either way.
+                let frac = 0.53 + (lead.y / 12.0).clamp(-1.0, 1.0) * 0.07;
                 // Screen y grows downwards, so the camera centre sits below
                 // the dog (smaller world y) to put the dog high in the frame.
                 let loose_y = g.pos.y - (0.5 - frac) * sh / s;
                 let follow_y = tight_y * fresh + loose_y * (1.0 - fresh);
                 // Hard clamp: the dog's hat never enters the top HUD band.
-                let min_y = g.pos.y + 2.6 - (0.5 * sh - 95.0) / s;
+                let min_y = g.pos.y + 2.6 - (0.5 * sh - 150.0) / s;
                 let max_y = g.pos.y + (0.5 * sh - 150.0) / s;
-                let lookahead = if g.phase == Phase::Flying { (0.30 - 0.18 * near) * sw / s } else { 0.10 * sw / s };
+                // Lead room: the dog flies at about a third from the left.
+                let lookahead = if g.phase == Phase::Flying { (0.16 - 0.08 * near) * sw / s } else { 0.10 * sw / s };
                 (g.pos.x + lookahead, base_y.max(follow_y).clamp(min_y, max_y), zoom, near)
             }
         }
@@ -149,16 +171,40 @@ impl Cam {
         // A crash snaps the camera onto the hole; a soft landing is a slow breath.
         let rate = if g.phase == Phase::Landed { if g.crashed { 9.0 } else { 1.8 } } else { 7.0 };
         let k = 1.0 - (-dt * rate).exp();
+        // Feed-forward: a smoothed follow trails a moving target by
+        // speed / rate, which let a fast dog run off the top of the frame;
+        // aim ahead by that much so the composition holds at any speed.
+        // Off the lip (before any wiggle) it reads the true velocity, since
+        // the smoothed copy is still catching up with the launch; later the
+        // smoothed one, so a wiggle hops the dog and not the world.
+        let fresh = if g.phase == Phase::Flying { (1.0 - (g.flight_time - 0.8) / 0.8).clamp(0.0, 1.0) } else { 0.0 };
+        let ffv = self.lead + (vec2(g.vel.x, g.vel.y) - self.lead) * fresh;
+        let (tx, ty) = if matches!(g.phase, Phase::Flying | Phase::Sliding { .. }) {
+            (tx + ffv.x / rate * 0.8, ty + ffv.y / rate.min(6.0) * 0.9)
+        } else {
+            (tx, ty)
+        };
+        // The PERFECT beat: a quick punch-in centred on the dog, released slowly.
+        self.beat = (self.beat - dt * 0.9).max(0.0);
+        let b = self.beat;
+        let be = if b > 0.88 { (1.0 - b) / 0.12 } else { b / 0.88 };
+        let be = be * be * (3.0 - 2.0 * be);
+        // Framed a little low and ahead, so the head clears the banner slot.
+        let zs = PPM * tz * (1.0 + 0.22 * be);
+        let (fx, fy) = (g.pos.x + 0.06 * screen_width() / zs, g.pos.y + 0.09 * screen_height() / zs);
+        let (tx, ty) = (tx + (fx - tx) * 0.8 * be, ty + (fy - ty) * 0.8 * be);
+        let tz = tz * (1.0 + 0.22 * be);
         // The punch-in before impact closes faster than the cruise.
-        let kz = if near > 0.0 || (g.phase == Phase::Landed && g.crashed) { 1.0 - (-dt * 10.0).exp() } else { k };
+        let kz = if near > 0.0 || be > 0.0 || (g.phase == Phase::Landed && g.crashed) { 1.0 - (-dt * 10.0).exp() } else { k };
         // Vertical follow lags a little so each wiggle kick hops the dog on screen.
         let ky = 1.0 - (-dt * rate.min(6.0)).exp();
+        let (k, ky) = if be > 0.0 { (k.max(1.0 - (-dt * 12.0).exp()), ky.max(1.0 - (-dt * 12.0).exp())) } else { (k, ky) };
         self.x += (tx - self.x) * k;
         self.y += (ty - self.y) * ky;
         // Hard clamp after smoothing: the dog's hat never enters the HUD band.
         if matches!(g.phase, Phase::Flying | Phase::Sliding { .. }) {
             let s = PPM * self.zoom;
-            let min_y = g.pos.y + 2.8 - (0.5 * screen_height() - 100.0) / s;
+            let min_y = g.pos.y + 2.8 - (0.5 * screen_height() - 130.0) / s;
             if self.y < min_y {
                 self.y = min_y;
             }
@@ -168,9 +214,14 @@ impl Cam {
         let env = (self.punch * std::f32::consts::PI).sin().max(0.0);
         let tz = tz * (1.0 + 0.10 * env);
         self.zoom += (tz - self.zoom) * kz;
-        self.shake_amp = (self.shake_amp - dt * 30.0).max(0.0);
-        let t = get_time() as f32;
-        self.shake = vec2((t * 61.0).sin(), (t * 47.0).cos()) * self.shake_amp;
+        // Shake: a hard hit, then a fast exponential settle; smooth noise
+        // on a game-time clock, so a slow-motion crash shakes in slow motion.
+        self.shake_amp = (self.shake_amp - dt * (6.0 + 4.5 * self.shake_amp)).max(0.0);
+        self.shake_clock += dt;
+        let c = self.shake_clock;
+        let nx = (c * 53.0).sin() * 0.5 + (c * 31.0 + 1.3).sin() * 0.3 + (c * 89.0 + 2.1).sin() * 0.2;
+        let ny = (c * 47.0 + 0.7).sin() * 0.5 + (c * 29.0 + 2.9).sin() * 0.3 + (c * 97.0 + 0.4).sin() * 0.2;
+        self.shake = vec2(nx, ny) * self.shake_amp;
     }
 
     pub fn to_screen(&self, wx: f32, wy: f32) -> Vec2 {
@@ -313,6 +364,8 @@ struct Shell {
 
 /// Real seconds the crash plays in slow motion before time returns to normal.
 const CRASH_SLOW: f32 = 1.1;
+/// Real seconds of the slow-motion beat after a PERFECT jump.
+const BEAT_SLOW: f32 = 1.0;
 
 struct LooseSled {
     pos: Vec2,
@@ -352,6 +405,13 @@ pub struct App {
     meteor_spin: f32,
     /// Real seconds of crash slow-motion left; time creeps back to normal as it runs out.
     crash_slow: f32,
+    /// Real seconds of the PERFECT-jump slow-motion beat left.
+    beat_slow: f32,
+    /// Procedural secondary motion for the dog: springs and the cape chain.
+    dog_anim: anim::DogAnim,
+    /// This frame's time without the slow-motion beats: the camera operator
+    /// keeps working at full speed while the world slows down.
+    cam_dt: f32,
     /// Game seconds since the run ended (respects slow motion), for the hold and the card.
     pub landed_for: f32,
     /// Fireworks shells in the air, waiting to burst.
@@ -434,10 +494,16 @@ pub struct App {
     pub display: Font,
     pub sprites: Sprites,
     pub pack: Pack,
+    /// Calgary's streets under the flight path, when the pack has them.
+    pub city: Option<City>,
+    /// The district the dog is flying over, for the welcome banners.
+    district: Option<usize>,
+    /// Santa's orders: the three active challenges, rank and cape.
+    pub orders: orders::Orders,
 }
 
 impl App {
-    fn new(font: Font, display: Font, sprites: Sprites, pack: Pack, sfx: Sfx) -> Self {
+    fn new(font: Font, display: Font, sprites: Sprites, pack: Pack, sfx: Sfx, city: Option<City>) -> Self {
         let seed = (get_time() * 1e6) as u64 | 1;
         let mut game = Game::new(PILOTS[0], seed);
         let scores = load_scores();
@@ -447,7 +513,7 @@ impl App {
         let (x, y, zoom, _) = Cam::target_for(&game, None, Vec2::ZERO);
         let mut app = App {
             game,
-            cam: Cam { x, y, zoom, shake: Vec2::ZERO, shake_amp: 0.0, lead: Vec2::ZERO, punch: 0.0, near: 0.0 },
+            cam: Cam { x, y, zoom, shake: Vec2::ZERO, shake_amp: 0.0, lead: Vec2::ZERO, punch: 0.0, near: 0.0, beat: 0.0, shake_clock: 0.0, cheer: 0.0 },
             acc: 0.0,
             fx: Vec::new(),
             particles: Particles::default(),
@@ -465,6 +531,9 @@ impl App {
             crash_size: 1.0,
             meteor_spin: 0.0,
             crash_slow: 0.0,
+            beat_slow: 0.0,
+            dog_anim: anim::DogAnim::new(),
+            cam_dt: 0.0,
             landed_for: 0.0,
             shells: Vec::new(),
             rocket_burst: 0.0,
@@ -513,7 +582,12 @@ impl App {
             display,
             sprites,
             pack,
+            city,
+            district: None,
+            orders: load_json::<orders::Orders>(orders::ORDERS_KEY),
         };
+        let cape = app.orders.cape;
+        app.orders.wear(cape);
         app.start_run();
         app.start_preview();
         app
@@ -528,11 +602,19 @@ impl App {
             save_json(DAILY_KEY, &self.daily);
         }
         let best = self.game.best_distance;
+        // Bank the orders the last flight finished; the next one gets new ones.
+        if self.game.phase == Phase::Landed {
+            self.orders.bank(self.game.orders_done);
+            save_json(orders::ORDERS_KEY, &self.orders);
+        }
         let i = self.pilot_idx;
         self.daily_run = self.daily.flown[i].is_none();
         let seed = if self.daily_run { (day as u64) ^ ((i as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)) } else { (get_time() * 1e6) as u64 | 1 };
         self.game = Game::new(PILOTS[i], seed);
         self.game.best_distance = best;
+        self.game.set_orders(self.orders.goals());
+        self.district = None;
+        self.dog_anim = anim::DogAnim::new();
     }
 
     /// Mark a rule as used; the prompt for it never shows again. Works on
@@ -614,6 +696,31 @@ impl App {
             self.preview = 0.0;
         }
         #[cfg(feature = "devkeys")]
+        if is_key_pressed(KeyCode::G) {
+            // Dev: glide low into the next district of the city, for screenshots.
+            if let Some(city) = &self.city {
+                let x = self.game.pos.x;
+                if let Some(d) = city.districts.iter().find(|d| d.from > x + 1.0) {
+                    self.game.dev_place(hamsters_core::math::Vec2::new(d.from + 4.0, 9.0), hamsters_core::math::Vec2::new(13.0, 3.0));
+                    self.preview = 0.0;
+                }
+            }
+        }
+        #[cfg(feature = "devkeys")]
+        if is_key_pressed(KeyCode::J) {
+            // Dev: skip 55 m ahead, gliding low.
+            let x = self.game.pos.x.max(0.0) + 55.0;
+            self.game.dev_place(hamsters_core::math::Vec2::new(x, 9.0), hamsters_core::math::Vec2::new(13.0, 3.0));
+            self.preview = 0.0;
+        }
+        #[cfg(feature = "devkeys")]
+        if is_key_pressed(KeyCode::N) {
+            // Dev: hop 150 m ahead into a freshly laid stretch of course.
+            let x = self.game.pos.x.max(0.0) + 150.0;
+            self.game.dev_course_at(hamsters_core::math::Vec2::new(x, 32.0), hamsters_core::math::Vec2::new(30.0, 6.0));
+            self.preview = 0.0;
+        }
+        #[cfg(feature = "devkeys")]
         if is_key_pressed(KeyCode::F) {
             // Dev: a fireworks display at the dog.
             let at = vec2(self.game.pos.x, self.game.pos.y);
@@ -641,6 +748,7 @@ impl App {
             if let Phase::AimPower { .. } = self.game.phase {
                 let (mx, my) = mouse_position();
                 if let Some(i) = hud::picker_hit(vec2(mx, my)) {
+                    self.sfx.select();
                     self.pilot_idx = i;
                     self.game.set_pilot(PILOTS[i]);
                     self.start_run();
@@ -675,6 +783,11 @@ impl App {
         }
         // Restart: the button on the results card, or R / Enter. Never a
         // stray click, and not in the first half second after landing.
+        if is_key_pressed(KeyCode::K) && matches!(self.game.phase, Phase::AimPower { .. }) {
+            // Change capes before a launch; ranks unlock more.
+            self.orders.next_cape();
+            save_json(orders::ORDERS_KEY, &self.orders);
+        }
         if is_key_pressed(KeyCode::M) {
             let on = self.sfx.toggle_music();
             save_json(MUSIC_KEY, &MusicSetting { on });
@@ -695,6 +808,11 @@ impl App {
             restart = true;
         }
         if restart {
+            if self.game.phase == Phase::Landed {
+                self.orders.bank(self.game.orders_done);
+                save_json(orders::ORDERS_KEY, &self.orders);
+            }
+            self.sfx.click();
             self.game.reset();
             self.start_run();
             self.loose_sled = None;
@@ -712,6 +830,7 @@ impl App {
         };
         if let Some(i) = pick {
             if matches!(self.game.phase, Phase::AimPower { .. }) {
+                self.sfx.select();
                 self.pilot_idx = i;
                 self.game.set_pilot(PILOTS[i]);
                 self.start_run();
@@ -728,7 +847,9 @@ impl App {
             // The world waits while the camera looks back; the needle is still.
             self.preview = (self.preview - frame_dt).max(0.0);
         } else if self.hitstop > 0.0 {
-            self.hitstop -= frame_dt;
+            // Hit-stop is counted in real time, so a slow-motion beat
+            // doesn't stretch the freeze frame.
+            self.hitstop -= self.cam_dt.max(frame_dt);
         } else {
             self.acc += sim_dt.min(0.1);
             while self.acc >= FIXED_DT {
@@ -756,11 +877,34 @@ impl App {
             let keep: Vec<Fx> = self.banner_queue.drain(..).filter(|f| f.banner).collect();
             self.banner_queue = keep;
         }
+        // Crossing into a new part of town gets a welcome banner.
+        if let (Some(city), Phase::Flying) = (&self.city, self.game.phase) {
+            if let Some(d) = city.district_index(self.game.pos.x) {
+                if self.district != Some(d) {
+                    self.district = Some(d);
+                    let at = vec2(self.game.pos.x, self.game.pos.y);
+                    self.banner_queue.push(Fx { pos: at, age: 0.0, life: 1.6, color: Color::new(1.0, 0.96, 0.86, 1.0), text: city.districts[d].name.clone(), banner: true });
+                }
+            }
+        }
         let events: Vec<Event> = self.game.events.drain(..).collect();
         for ev in events {
             self.on_event(ev);
         }
-        self.cam.follow(&self.game, frame_dt, self.preview_state());
+        let cam_dt = if self.beat_slow > 0.0 || self.crash_slow > 0.0 { self.cam_dt.max(frame_dt) } else { frame_dt };
+        self.cam.follow(&self.game, cam_dt, self.preview_state());
+        // Secondary motion: frozen with the world during hit-stop.
+        let anim_dt = if self.hitstop > 0.0 || self.preview > 0.0 { 0.0 } else { frame_dt };
+        self.dog_anim.update(&self.game, self.flap_anim, self.tumble, anim_dt);
+        // The crowd: calm while aiming, on its toes once the sled goes, wild
+        // for the take-off, settling during the flight.
+        let cheer = match self.game.phase {
+            Phase::AimPower { .. } => 0.0,
+            Phase::Sliding { t, .. } => 0.4 + 0.6 * t.min(1.0),
+            Phase::Flying => (1.0 - (self.game.flight_time - 2.0) / 3.0).clamp(0.3, 1.0),
+            Phase::Landed => 0.3,
+        };
+        self.cam.cheer += (cheer - self.cam.cheer) * (1.0 - (-frame_dt * 4.0).exp());
         self.particles.update(frame_dt);
         let airspeed = if self.game.phase == Phase::Flying { self.game.vel.length() } else { 0.0 };
         self.sfx.set_wind(airspeed, self.game.rocket > 0.0, frame_dt);
@@ -769,6 +913,8 @@ impl App {
             _ => 0.0,
         };
         self.sfx.set_slide(slide_level, frame_dt);
+        let burn = if self.game.phase != Phase::Flying { 0.0 } else if self.game.rocket > 0.0 { 1.0 } else { self.game.meteor() };
+        self.sfx.set_burn(burn, frame_dt);
         self.sfx.update_music(frame_dt, self.game.phase == Phase::Landed);
         // Breath in cold air while the dog sits where it landed.
         if self.game.phase == Phase::Landed && !self.game.crashed {
@@ -787,8 +933,13 @@ impl App {
         self.zap_flash = (self.zap_flash - frame_dt).max(0.0);
         self.dist_pulse = (self.dist_pulse - frame_dt * 5.0).max(0.0);
         let frozen_now = self.game.frozen > 0.0;
+        if frozen_now {
+            self.particles.emit_frost(vec2(self.game.pos.x, self.game.pos.y), frame_dt);
+        }
         if self.was_frozen && !frozen_now {
+            self.sfx.thaw();
             let at = vec2(self.game.pos.x, self.game.pos.y);
+            self.particles.emit_shatter(at);
             self.particles.emit_confetti(at, 24);
             self.particles.emit_sparkles(at, 16);
             self.particles.emit_ring(at, Color::new(0.7, 0.9, 1.0, 1.0));
@@ -810,6 +961,7 @@ impl App {
         // Fireworks shells burst on their own clock.
         for sh in &mut self.shells {
             sh.delay -= frame_dt;
+            self.particles.shell_rising(sh.pos, sh.delay);
         }
         let mut burst: Vec<Shell> = Vec::new();
         self.shells.retain_mut(|sh| {
@@ -855,6 +1007,8 @@ impl App {
                     if self.game.distance() >= d {
                         self.best_beaten = true;
                         self.dist_pulse = 1.0;
+                        self.sfx.record();
+                        self.firework_display(5);
                     }
                 }
             }
@@ -945,7 +1099,7 @@ impl App {
             }
             if matches!(g.phase, Phase::Sliding { .. }) {
                 // Snow spray off the runners.
-                self.particles.emit_snow(hp - vec2(0.6, 1.1), vec2(-g.vel.x * 0.2, 3.0), 2);
+                self.particles.emit_spray(hp - vec2(0.6, 1.1), vec2(g.vel.x, g.vel.y));
             }
         }
     }
@@ -1019,6 +1173,7 @@ impl App {
             Event::Pushed => {
                 // The first gesture of a run: browsers allow audio from here.
                 self.sfx.start_music();
+                self.sfx.lock();
                 Self::teach(&mut self.taught, TEACH_PUSH);
                 self.particles.emit_snow(vec2(RAMP_TOP.x, RAMP_TOP.y + 0.3), vec2(-2.0, 2.0), 6);
             }
@@ -1059,6 +1214,15 @@ impl App {
                 self.hitstop = 0.1;
                 self.flash = 0.7;
                 self.launch_stretch = 1.0;
+                let perfect = !g.botched && g.jump_q >= hamsters_core::JUMP_PERFECT_FROM;
+                self.dog_anim.launch(perfect);
+                if perfect {
+                    // The money shot: the world drops to slow motion while
+                    // the camera punches in on the dog leaving the lip.
+                    self.beat_slow = BEAT_SLOW;
+                    self.cam.beat = 1.0;
+                    self.cam.punch = 0.0;
+                }
                 self.pickup_pop = 0.4;
                 self.best_before = g.best_distance;
                 self.boomed = false;
@@ -1075,6 +1239,7 @@ impl App {
                     self.launch_stretch = 0.0;
                     self.cam.shake_amp = 2.0;
                     self.tumble = 1.0;
+                    self.sfx.botch();
                     self.reaction = Some((draw::Face::Panic, 3.0));
                     self.particles.emit_snow(vec2(LIP.x, LIP.y + 0.3), vec2(1.0, 1.5), 8);
                 }
@@ -1085,6 +1250,7 @@ impl App {
                 self.sfx.gust();
                 self.flap_anim = 1.0;
                 self.wiggle_pulse = 1.0;
+                self.dog_anim.flap(g.flap_lift());
                 // A wiggle at speed bites more air: bigger puff, more spray.
                 let lift = g.flap_lift();
                 self.particles.emit_puffs(at - vec2(0.0, 1.6), (8.0 + 8.0 * lift) as usize, Color::new(1.0, 1.0, 1.0, 0.95));
@@ -1092,6 +1258,7 @@ impl App {
                 self.particles.emit_sparkles(at + vec2(0.0, 0.8), 4);
             }
             Event::WigglePower => {
+                self.sfx.power();
                 self.particles.emit_sparkles(at, 24);
                 self.particles.emit_confetti(at, 20);
                 self.particles.emit_ring(at, Color::new(1.0, 0.86, 0.3, 1.0));
@@ -1135,6 +1302,7 @@ impl App {
                 }
                 match kind {
                     EntityKind::Trampoline => {
+                        self.dog_anim.impact(1.0);
                         self.particles.emit_ring(at, color);
                         self.particles.emit_snow(vec2(at.x, 0.3), vec2(0.0, 4.0), 30);
                         self.squash = 1.0;
@@ -1156,6 +1324,7 @@ impl App {
                         self.particles.emit_confetti(at, 5);
                         self.particles.emit_ring_sized(at, gold, 1.0, 0.14);
                         self.pickup_pop = 1.0;
+                        self.dog_anim.pop();
                     }
                     EntityKind::Firework => {
                         self.particles.emit_ring(at, color);
@@ -1170,6 +1339,7 @@ impl App {
                     }
                     EntityKind::Wings => self.particles.emit_sparkles(at, 12),
                     EntityKind::ColdWind => {
+                        self.particles.emit_freeze(at);
                         self.particles.emit_snow(at, vec2(-8.0, 0.0), 30);
                         self.particles.emit_sparkles(at, 10);
                         self.hitstop = 0.08;
@@ -1192,6 +1362,8 @@ impl App {
                         self.cam.shake_amp = 10.0;
                     }
                     EntityKind::Stormcloud => {
+                        self.particles.emit_zap(at);
+                        self.dog_anim.impact(0.8);
                         self.particles.emit_snow(at, vec2(-4.0, -2.0), 16);
                         self.particles.emit_sparkles(at, 14);
                         self.squash = 1.0;
@@ -1237,10 +1409,12 @@ impl App {
                 Self::teach(&mut self.taught, TEACH_STOMP);
                 // The tuck: a quick crouch and a puff, no words.
                 self.tuck = 1.0;
+                self.dog_anim.impact(0.4);
                 self.particles.emit_puffs(at - vec2(0.0, 1.0), 6, Color::new(1.0, 1.0, 1.0, 0.8));
             }
             Event::GroundBounce { speed, stomped } => {
                 self.sfx.bounce(speed, stomped);
+                self.dog_anim.impact(speed / 14.0);
                 if stomped {
                     // A stomped bounce: one clean white ring and a big spray.
                     self.particles.emit_ring(vec2(at.x, 0.6), WHITE);
@@ -1267,14 +1441,14 @@ impl App {
                 }
             }
             Event::Meteor => {
-                self.sfx.gust();
+                self.sfx.meteor();
                 self.reaction = Some((draw::Face::Scream, 4.0));
                 self.banner_queue.push(Fx { pos: at, age: 0.0, life: 1.1, color: Color::new(1.0, 0.45, 0.10, 1.0), text: self.pack.labels.meteor.clone(), banner: true });
                 self.particles.emit_ring(at, Color::new(1.0, 0.6, 0.2, 1.0));
                 self.particles.emit_burst_behind(at, 24);
             }
             Event::Crashed { speed } => {
-                self.sfx.crash();
+                self.sfx.crash_impact(speed);
                 self.fx.retain(|f| !f.banner);
                 self.banner_queue.clear();
                 // How much harder than an ordinary splat: 0 at the crash
@@ -1284,16 +1458,7 @@ impl App {
                 let label = if big > 0.5 { self.pack.labels.crash_meteor.clone() } else { self.pack.labels.crash.clone() };
                 let color = if big > 0.5 { Color::new(1.0, 0.45, 0.10, 1.0) } else { Color::new(1.0, 0.92, 0.2, 1.0) };
                 self.fx.push(Fx { pos: vec2(at.x, 2.5), age: 0.0, life: 1.2 + 0.6 * big, color, text: label, banner: true });
-                self.particles.emit_snow(vec2(at.x, 0.2), vec2(0.0, 9.0 + 9.0 * big), (60.0 + 120.0 * big) as usize);
-                self.particles.emit_clods(vec2(at.x, 0.2), vec2(0.0, 10.0 + 12.0 * big), (40.0 + 100.0 * big) as usize);
-                self.particles.emit_plume(vec2(at.x, 0.3), vec2(0.0, 14.0 * big), (30.0 * big) as usize);
-                if big > 0.0 {
-                    for i in 0..(6.0 * big) as i32 {
-                        self.particles.emit_flame(vec2(at.x + (i as f32 - 3.0) * 0.8, 0.6), vec2(0.0, -6.0));
-                    }
-                    self.particles.emit_burst_behind(vec2(at.x, 1.0), (40.0 * big) as usize);
-                }
-                self.particles.emit_ring_sized(vec2(at.x, 0.5), if big > 0.5 { Color::new(1.0, 0.7, 0.3, 1.0) } else { WHITE }, 1.0 + 2.5 * big, 0.5 + 0.5 * big);
+                self.particles.emit_crash(at.x, big);
                 self.crash_size = 1.0 + 1.2 * big;
                 self.craters.push((at.x, 1.4 + 1.6 * big));
                 self.hitstop = 0.12 + 0.2 * big;
@@ -1303,13 +1468,36 @@ impl App {
                 self.sink_spurt = 0.0;
                 // The crash is the payoff of a bad flight: play it in slow motion.
                 self.crash_slow = CRASH_SLOW;
+                if big > 0.5 {
+                    // A meteor gets the deeper beat on top: a fifth of speed at the hit.
+                    self.beat_slow = BEAT_SLOW;
+                }
             }
             Event::Milestone(i) => {
                 self.sfx.milestone();
+                self.firework_display(3);
                 let name = self.pack.milestone(i);
                 self.particles.emit_confetti(at, 40);
                 self.particles.emit_sparkles(at, 20);
                 self.banner_queue.push(Fx { pos: at, age: 0.0, life: 2.0, color: Color::new(0.75, 0.95, 1.0, 1.0), text: name.to_owned(), banner: true });
+            }
+            Event::CloseShave => {
+                // Skimmed a storm cloud: a quick stamp and a crackle of sparks.
+                self.sfx.gust();
+                self.particles.emit_sparkles(at, 14);
+                self.particles.emit_ring_sized(at, Color::new(0.95, 0.9, 0.5, 1.0), 0.8, 0.2);
+                self.fx.retain(|f| f.banner || f.text != "CLOSE SHAVE!");
+                self.fx.push(Fx { pos: at, age: 0.0, life: 0.8, color: Color::new(0.95, 0.9, 0.5, 1.0), text: "CLOSE SHAVE!".into(), banner: false });
+            }
+            Event::MissionComplete(i) => {
+                // An order done mid-flight: a gold ribbon, confetti, and the
+                // row on the tracker flashes.
+                self.orders.ticked_at[i] = Some(get_time());
+                self.sfx.milestone();
+                self.particles.emit_confetti(at, 36);
+                self.particles.emit_sparkles(at, 18);
+                let what = self.orders.goals()[i].map(hamsters_core::missions::describe).unwrap_or_default().to_uppercase();
+                self.banner_queue.push(Fx { pos: at, age: 0.0, life: 1.8, color: hud::GOLD, text: format!("DONE: {what}!"), banner: true });
             }
             Event::Landed { .. } => {
                 self.sfx.land();
@@ -1323,6 +1511,7 @@ impl App {
                 // Tongue out, catching breath, for the whole hold.
                 self.reaction = Some((draw::Face::Whee, hud::result_hold(g.crashed)));
                 self.last_distance = g.distance();
+                self.sfx.queue_results(hud::result_hold(g.crashed), g.crashed, g.distance() > 0.0 && g.distance() >= self.best_before);
                 self.bests[self.pilot_idx] = self.bests[self.pilot_idx].max(g.distance());
                 if g.distance() > 0.0 && g.distance() >= self.best_before {
                     let mut path: Vec<(f32, f32)> = self.run_path.iter().map(|p| (p.x, p.y)).collect();
@@ -1347,10 +1536,20 @@ impl App {
                 // The rank stamp drops onto the pennant that now marks this run.
                 // A crash keeps its SPLAT banner and the hole; no stamp on top.
                 let rank = if self.game.crashed { None } else { self.scores.iter().position(|s| (s.distance - self.game.distance()).abs() < 0.01) };
+                if rank == Some(0) {
+                    self.firework_display(6);
+                }
                 if let Some(rank) = rank {
                     self.fx.retain(|f| !f.banner);
                     self.banner_queue.clear();
                     self.fx.push(Fx { pos: vec2(at.x, 3.0), age: 0.0, life: 1.6, color: hud::GOLD, text: format!("#{}", rank + 1), banner: false });
+                }
+                // Orders finished this flight may lift the flight-school rank.
+                let gained = self.game.orders_done.iter().filter(|d| **d).count() as u32;
+                let (before, after) = (hamsters_core::missions::rank_for(self.orders.done), hamsters_core::missions::rank_for(self.orders.done + gained));
+                if after > before {
+                    let title = hamsters_core::missions::RANKS[after].1;
+                    self.banner_queue.push(Fx { pos: at, age: 0.0, life: 2.0, color: hud::GOLD, text: format!("{title}! NEW CAPE"), banner: true });
                 }
             }
         }
@@ -1370,6 +1569,8 @@ impl App {
         let cam = &self.cam;
         let sp = &self.sprites;
         let t = get_time() as f32;
+        // World into the post-processing scene buffer; the HUD stays outside.
+        let post_on = post::begin();
 
         // While aiming the sun sits further left, clear of the pilot picker.
         let aim_k = match g.phase {
@@ -1381,22 +1582,24 @@ impl App {
         draw::clouds(sp, cam);
         draw::jet_streamers(cam, t);
         draw::mountains(sp, cam);
+        if let Some(c) = &self.city {
+            c.skyline(cam);
+        }
+        post::haze(cam);
         draw::hills(sp, cam, if g.phase == Phase::Flying { g.vel.length() } else { 0.0 });
         draw::midground(sp, cam);
+        if let Some(c) = &self.city {
+            c.street(cam, g.pos.x, t);
+        }
         if g.crashed {
             // Head-first in the snow: drawn before the ground so it disappears into it.
             let k = self.crash_sink;
             let ease = 1.0 - (1.0 - k) * (1.0 - k);
             draw::dog_buried(sp, cam, g.pos.x, self.pilot_idx, ease, t, self.crash_size);
         }
-        draw::ground(sp, cam, &self.font, &self.pack.towns);
+        draw::ground(sp, cam, &self.font, &self.pack.towns, self.city.as_ref());
         for (cx, size) in &self.craters {
-            let p = cam.to_screen(*cx, 0.0);
-            let sc = cam.scale();
-            draw_ellipse(p.x, p.y + 0.12 * sc, 2.8 * sc * size, 0.7 * sc * size, 0.0, Color::new(0.5, 0.57, 0.82, 0.6));
-            draw_ellipse(p.x, p.y + 0.02 * sc, 2.1 * sc * size, 0.45 * sc * size, 0.0, Color::new(0.78, 0.83, 0.96, 0.85));
-            draw_ellipse(p.x - 1.2 * sc * size, p.y - 0.15 * sc, 0.7 * sc * size, 0.3 * sc * size, 0.0, Color::new(1.0, 1.0, 1.0, 0.9));
-            draw_ellipse(p.x + 1.2 * sc * size, p.y - 0.15 * sc, 0.7 * sc * size, 0.3 * sc * size, 0.0, Color::new(1.0, 1.0, 1.0, 0.9));
+            vfx::snow_crater(cam, *cx, *size);
         }
         draw::landing_zone(cam, g.landing_x, t);
         // Every past flight is a pennant to pass; the best is the ghost's
@@ -1425,20 +1628,15 @@ impl App {
         }
         draw::spectators(sp, cam, g.pos.x, t);
         draw::start_area(sp, cam, &self.display, &self.pack.tower_sign);
+        anim::roof_crowd(sp, cam, g.pos.x, t);
 
         for e in &g.entities {
             draw::entity(sp, cam, e, t, if g.phase == Phase::Flying { Some((vec2(g.pos.x, g.pos.y), vec2(g.vel.x, g.vel.y))) } else { None });
         }
 
         let speed = g.vel.length();
-        let n = self.trail.len();
-        if speed > 12.0 {
-            for (i, p) in self.trail.iter().enumerate() {
-                let k = (i + 1) as f32 / (n + 1) as f32;
-                let sp_ = cam.to_screen(p.x, p.y);
-                let a = 0.22 * k * ((speed - 12.0) / 30.0).clamp(0.0, 1.0);
-                draw_circle(sp_.x, sp_.y, PILOT_RADIUS * cam.scale() * 0.6 * k, Color::new(1.0, 1.0, 1.0, a));
-            }
+        if g.phase == Phase::Flying {
+            vfx::motion_trail(cam, &self.trail, vec2(g.pos.x, g.pos.y), speed, draw::scarf_color(self.pilot_idx), PILOT_RADIUS * cam.scale());
         }
 
         self.particles.draw_behind(sp, cam);
@@ -1491,12 +1689,15 @@ impl App {
             None
         };
         let (face, limbs) = if sliding {
+            // Always happy on the sled: open-mouthed joy on the ride.
             (draw::Face::Whee, draw::Limbs::Seated)
         } else if g.phase == Phase::Flying {
             let (face, body) = if g.frozen > 0.0 {
                 (draw::Face::Panic, draw::Limbs::Land)
             } else if g.flight_time < 0.6 {
-                (draw::Face::Scream, draw::Limbs::Spread)
+                // A PERFECT take-off is pure joy; anything else is a yell.
+                let joy = !g.botched && g.jump_q >= hamsters_core::JUMP_PERFECT_FROM;
+                (if joy { draw::Face::Whee } else { draw::Face::Scream }, draw::Limbs::Spread)
             } else if g.meteor() > 0.2 {
                 (draw::Face::Scream, draw::Limbs::Tumble)
             } else if self.tumble > 0.0 {
@@ -1526,6 +1727,8 @@ impl App {
         } else {
             (draw::Face::Idle, draw::Limbs::Seated)
         };
+        // Blink while sitting still on the start gate.
+        let face = if face == draw::Face::Idle && self.dog_anim.blinking() && !matches!(g.phase, Phase::Flying) { draw::Face::Grit } else { face };
         if speed > 14.0 && g.phase == Phase::Flying && g.flight_time > 0.3 {
             let k_speed = ((speed - 14.0) / 26.0).clamp(0.0, 1.0);
             let dir = vec2(g.vel.x, -g.vel.y).normalize_or_zero();
@@ -1556,10 +1759,8 @@ impl App {
             }
         }
         if g.crashed {
-            let gp = cam.to_screen(g.pos.x, 0.0);
-            let s = cam.scale();
-            draw_ellipse(gp.x, gp.y, 1.9 * s, 0.5 * s, 0.0, Color::new(0.2, 0.18, 0.3, 0.95));
-            draw_ellipse(gp.x, gp.y - 0.1 * s, 1.7 * s, 0.38 * s, 0.0, Color::new(0.06, 0.05, 0.12, 1.0));
+            vfx::crash_hole(cam, g.pos.x, self.crash_size, t);
+            props::crash_rim(cam, g.pos.x, self.crash_size, self.crash_sink);
             // Paws and tail above the rim: redraw the buried body clipped to above the hole.
             if self.crash_sink >= 1.0 {
                 draw::dog_paws_up(sp, cam, g.pos.x, self.pilot_idx, t);
@@ -1586,6 +1787,7 @@ impl App {
                     pips: -1,
                     frozen: g.frozen > 0.0,
                     ball: g.meteor(),
+                    rig: self.dog_anim.rig(),
                 },
             );
         }
@@ -1598,6 +1800,9 @@ impl App {
         draw::foreground(sp, cam, if g.phase == Phase::Flying { speed } else { 0.0 });
 
         self.particles.draw_front(sp, cam);
+        if g.phase == Phase::Flying && g.flight_time > 0.4 {
+            vfx::speed_lines(cam, vec2(g.vel.x, g.vel.y), hp, t);
+        }
         // Off the lip the near clouds smear over the dog: keep them thin for a second.
         let cloud_cap = if g.phase == Phase::Flying && g.flight_time < 1.0 { 0.35 } else { 1.0 };
         draw::near_clouds(sp, cam, if g.phase == Phase::Flying { speed } else { 0.0 }, cloud_cap);
@@ -1607,6 +1812,7 @@ impl App {
             let calm = if g.phase == Phase::Flying && g.flight_time < 2.5 { 0.5 } else { 1.0 - 0.6 * settle };
             draw::snowfall(sp, cam, if g.phase == Phase::Flying { vec2(g.vel.x, g.vel.y) } else { Vec2::ZERO }, calm);
         }
+        post::end(cam);
         if self.flash > 0.0 {
             draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(1.0, 1.0, 1.0, self.flash * 0.8));
         }
@@ -1628,6 +1834,9 @@ impl App {
 
         // Speed lines.
         for f in &self.fx {
+            if hud::draw_fx(self, f, hp, r) {
+                continue;
+            }
             let k = f.age / f.life;
             let mut c = f.color;
             c.a = if k < 0.7 { 1.0 } else { (1.0 - k) / 0.3 };
@@ -1725,30 +1934,56 @@ impl App {
                 }
             }
         }
-        draw_texture_ex(&sp.vignette, 0.0, 0.0, WHITE, DrawTextureParams { dest_size: Some(vec2(screen_width(), screen_height())), ..Default::default() });
+        if !post_on {
+            draw_texture_ex(&sp.vignette, 0.0, 0.0, WHITE, DrawTextureParams { dest_size: Some(vec2(screen_width(), screen_height())), ..Default::default() });
+        }
         hud::render(self);
+        orders::draw(self);
     }
 }
 
 /// Shell colours, cycled so a display is never one colour.
-const FIREWORK_COLORS: [Color; 5] = [
-    Color::new(1.0, 0.35, 0.35, 1.0),
-    Color::new(1.0, 0.85, 0.3, 1.0),
-    Color::new(0.45, 0.85, 1.0, 1.0),
-    Color::new(0.5, 1.0, 0.6, 1.0),
-    Color::new(1.0, 0.55, 0.9, 1.0),
+const FIREWORK_COLORS: [Color; 6] = [
+    Color::new(1.0, 0.22, 0.28, 1.0),
+    Color::new(1.0, 0.84, 0.28, 1.0),
+    Color::new(0.30, 0.62, 1.0, 1.0),
+    Color::new(0.35, 1.0, 0.50, 1.0),
+    Color::new(1.0, 0.42, 0.85, 1.0),
+    Color::new(0.88, 0.94, 1.0, 1.0),
 ];
 
 impl App {
     /// Time-scale for this frame: the crash runs at a third speed and eases
     /// back to normal over `CRASH_SLOW` real seconds. Ticks the timer.
     fn slow_motion(&mut self, real_dt: f32) -> f32 {
+        // The PERFECT beat: a fifth of speed off the lip, held a moment,
+        // then easing back to full speed.
+        let beat = if self.beat_slow > 0.0 {
+            self.beat_slow = (self.beat_slow - real_dt).max(0.0);
+            let k = (self.beat_slow / (BEAT_SLOW * 0.6)).min(1.0);
+            0.2 + 0.8 * (1.0 - k) * (1.0 - k)
+        } else {
+            1.0
+        };
         if self.crash_slow <= 0.0 {
-            return 1.0;
+            return beat;
         }
         self.crash_slow = (self.crash_slow - real_dt).max(0.0);
         let k = self.crash_slow / CRASH_SLOW;
-        0.3 + 0.7 * (1.0 - k) * (1.0 - k)
+        (0.3 + 0.7 * (1.0 - k) * (1.0 - k)).min(beat)
+    }
+
+    /// A fireworks display of `n` shells ahead of and above the dog, bursting
+    /// in turn (records and milestones).
+    fn firework_display(&mut self, n: usize) {
+        let at = vec2(self.game.pos.x, self.game.pos.y.max(8.0));
+        let lead = vec2(self.game.vel.x, 0.0) * 0.35;
+        for i in 0..n {
+            let fi = i as f32;
+            let off = vec2(4.0 + 7.0 * fi - 3.0 * (i % 2) as f32, 5.0 + 4.0 * ((fi * 1.7).sin() + 1.0));
+            let color = FIREWORK_COLORS[(self.shells.len() + i * 2 + 1) % FIREWORK_COLORS.len()];
+            self.shells.push(Shell { pos: at + lead + off, delay: 0.35 + 0.32 * fi, color });
+        }
     }
 
     /// Current present chain length, for the HUD counter.
@@ -1765,13 +2000,15 @@ async fn main() {
     let display = load_ttf_font_from_bytes(include_bytes!("../assets/LilitaOne.ttf")).expect("bundled font");
     let pack = Pack::load_active().await;
     let sprites = Sprites::load(&pack.sprite_dir()).await;
+    let city = City::load(&pack.pack_dir(), &pack.sprite_dir()).await;
     let mut sfx = Sfx::load(&pack.sound_dir()).await;
     sfx.set_music_enabled(load_json::<MusicSetting>(MUSIC_KEY).on);
-    let mut app = App::new(font, display, sprites, pack, sfx);
+    let mut app = App::new(font, display, sprites, pack, sfx, city);
     loop {
         app.handle_input();
         let real = get_frame_time();
         let dt = real * app.time_scale * app.slow_motion(real);
+        app.cam_dt = real * app.time_scale;
         app.update(dt);
         app.render();
         next_frame().await;

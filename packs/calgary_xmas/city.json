@@ -1,0 +1,593 @@
+{
+ "skyline": {
+  "sprite": "skyline",
+  "x": 260.0,
+  "factor": 0.08,
+  "height": 420.0
+ },
+ "traffic": [
+  {
+   "sprite": "car_blue",
+   "w": 4.8
+  },
+  {
+   "sprite": "car_taxi",
+   "w": 4.8
+  },
+  {
+   "sprite": "car_white",
+   "w": 4.8
+  },
+  {
+   "sprite": "pickup",
+   "w": 5.6
+  },
+  {
+   "sprite": "car_blue",
+   "w": 4.8
+  },
+  {
+   "sprite": "car_taxi",
+   "w": 4.8
+  }
+ ],
+ "skyline_far": {
+  "sprite": "skyline_far",
+  "x": 240.0,
+  "factor": 0.05,
+  "height": 300.0
+ },
+ "districts": [
+  {
+   "name": "INGLEWOOD",
+   "landed": "in Inglewood, 9 Av SE",
+   "street": "9 Av SE",
+   "from": 22,
+   "to": 190,
+   "ground": "street",
+   "facades": [
+    {
+     "sprite": "bld_ingle_a",
+     "w": 15.0,
+     "smoke": [
+      0.878,
+      0.098
+     ]
+    },
+    {
+     "sprite": "bld_ingle_b",
+     "w": 10.0,
+     "smoke": [
+      0.847,
+      0.042
+     ]
+    },
+    {
+     "sprite": "bld_ingle_c",
+     "w": 9.0,
+     "smoke": [
+      0.196,
+      0.041
+     ]
+    },
+    {
+     "sprite": "bld_ingle_d",
+     "w": 8.0
+    }
+   ],
+   "props": [
+    {
+     "sprite": "lit_tree",
+     "w": 5.0,
+     "weight": 1.0
+    },
+    {
+     "sprite": "ped_hat",
+     "w": 1.56,
+     "weight": 1.0
+    },
+    {
+     "sprite": "ped_kid",
+     "w": 1.19,
+     "weight": 0.6
+    },
+    {
+     "sprite": "ped_walker",
+     "w": 3.41,
+     "weight": 1.0
+    },
+    {
+     "sprite": "ped_granny",
+     "w": 1.5,
+     "weight": 0.8
+    },
+    {
+     "sprite": "ped_caroler",
+     "w": 1.56,
+     "weight": 0.6
+    },
+    {
+     "sprite": "car_red",
+     "w": 4.8,
+     "weight": 0.8
+    },
+    {
+     "sprite": "magpie",
+     "w": 0.6,
+     "weight": 0.8
+    },
+    {
+     "sprite": "jackrabbit",
+     "w": 0.7,
+     "weight": 0.4
+    }
+   ],
+   "landmarks": [
+    {
+     "sprite": "gate_ingle",
+     "x": 23,
+     "w": 4.6,
+     "lift": 0.0
+    }
+   ]
+  },
+  {
+   "name": "STEPHEN AVENUE",
+   "landed": "on Stephen Avenue, downtown",
+   "street": "Downtown",
+   "from": 190,
+   "to": 400,
+   "ground": "street",
+   "facades": [
+    {
+     "sprite": "bld_sand_a",
+     "w": 13.0
+    },
+    {
+     "sprite": "bld_tower_glass",
+     "w": 16.0
+    },
+    {
+     "sprite": "bld_sand_b",
+     "w": 11.0
+    },
+    {
+     "sprite": "bld_tower_concrete",
+     "w": 14.0
+    }
+   ],
+   "props": [
+    {
+     "sprite": "stephen_lamp",
+     "w": 1.6,
+     "weight": 2.0
+    },
+    {
+     "sprite": "ped_hat",
+     "w": 1.56,
+     "weight": 1.2
+    },
+    {
+     "sprite": "ped_fan",
+     "w": 1.56,
+     "weight": 0.4
+    },
+    {
+     "sprite": "ped_caroler",
+     "w": 1.56,
+     "weight": 1.0
+    },
+    {
+     "sprite": "ped_granny",
+     "w": 1.5,
+     "weight": 0.8
+    },
+    {
+     "sprite": "ped_walker",
+     "w": 3.41,
+     "weight": 0.6
+    },
+    {
+     "sprite": "lit_tree",
+     "w": 5.0,
+     "weight": 0.8
+    },
+    {
+     "sprite": "magpie",
+     "w": 0.6,
+     "weight": 0.5
+    }
+   ],
+   "landmarks": [
+    {
+     "sprite": "gate_stephen",
+     "x": 191,
+     "w": 4.6,
+     "lift": 0.0
+    },
+    {
+     "sprite": "bld_city_hall",
+     "x": 198,
+     "w": 22.0,
+     "lift": 0.0
+    },
+    {
+     "sprite": "wonderland",
+     "x": 300,
+     "w": 7.0,
+     "lift": 0.0
+    },
+    {
+     "sprite": "temp_sign",
+     "x": 330,
+     "w": 2.4,
+     "lift": 0.0
+    }
+   ],
+   "train": {
+    "sprite": "ctrain",
+    "w": 24.0,
+    "speed": 7.0
+   },
+   "skywalk": {
+    "sprite": "plus15",
+    "lift": 4.6
+   }
+  },
+  {
+   "name": "THE BOW",
+   "landed": "on the frozen Bow",
+   "street": "Peace Bridge",
+   "from": 400,
+   "to": 480,
+   "ground": "river",
+   "facades": [],
+   "props": [
+    {
+     "sprite": "ped_skater",
+     "w": 1.56,
+     "weight": 1.4
+    },
+    {
+     "sprite": "ped_hockey",
+     "w": 1.19,
+     "weight": 1.0
+    },
+    {
+     "sprite": "ped_walker",
+     "w": 3.41,
+     "weight": 0.4
+    },
+    {
+     "sprite": "magpie",
+     "w": 0.6,
+     "weight": 0.3
+    }
+   ],
+   "landmarks": [
+    {
+     "sprite": "gate_bow",
+     "x": 401,
+     "w": 4.6,
+     "lift": 0.0
+    },
+    {
+     "sprite": "peace_bridge",
+     "x": 412,
+     "w": 54.0,
+     "lift": 1.2
+    }
+   ]
+  },
+  {
+   "name": "KENSINGTON",
+   "landed": "in Kensington",
+   "street": "Kensington Rd NW",
+   "from": 480,
+   "to": 650,
+   "ground": "street",
+   "facades": [
+    {
+     "sprite": "bld_kens_a",
+     "w": 9.0
+    },
+    {
+     "sprite": "bld_plaza",
+     "w": 12.0
+    },
+    {
+     "sprite": "bld_kens_c",
+     "w": 10.0,
+     "smoke": [
+      0.833,
+      0.062
+     ]
+    },
+    {
+     "sprite": "bld_kens_b",
+     "w": 15.0
+    }
+   ],
+   "props": [
+    {
+     "sprite": "lit_tree",
+     "w": 5.0,
+     "weight": 1.2
+    },
+    {
+     "sprite": "chalkboard",
+     "w": 0.9,
+     "weight": 0.6
+    },
+    {
+     "sprite": "ped_hat",
+     "w": 1.56,
+     "weight": 0.8
+    },
+    {
+     "sprite": "ped_kid",
+     "w": 1.19,
+     "weight": 0.6
+    },
+    {
+     "sprite": "ped_walker",
+     "w": 3.41,
+     "weight": 1.0
+    },
+    {
+     "sprite": "ped_caroler",
+     "w": 1.56,
+     "weight": 0.6
+    },
+    {
+     "sprite": "ped_granny",
+     "w": 1.5,
+     "weight": 0.5
+    },
+    {
+     "sprite": "car_blue",
+     "w": 4.8,
+     "weight": 0.6
+    },
+    {
+     "sprite": "magpie",
+     "w": 0.6,
+     "weight": 0.6
+    }
+   ],
+   "landmarks": [
+    {
+     "sprite": "gate_kens",
+     "x": 481,
+     "w": 4.6,
+     "lift": 0.0
+    }
+   ]
+  },
+  {
+   "name": "THE RED MILE",
+   "landed": "on the Red Mile, 17 Av SW",
+   "street": "17 Av SW",
+   "from": 650,
+   "to": 850,
+   "ground": "street",
+   "facades": [
+    {
+     "sprite": "bld_red_a",
+     "w": 11.0
+    },
+    {
+     "sprite": "bld_red_b",
+     "w": 10.0,
+     "smoke": [
+      0.87,
+      0.067
+     ]
+    },
+    {
+     "sprite": "bld_red_c",
+     "w": 12.0
+    }
+   ],
+   "props": [
+    {
+     "sprite": "ped_fan",
+     "w": 1.56,
+     "weight": 1.6
+    },
+    {
+     "sprite": "ped_jersey",
+     "w": 1.56,
+     "weight": 1.6
+    },
+    {
+     "sprite": "cone",
+     "w": 0.55,
+     "weight": 1.2
+    },
+    {
+     "sprite": "roadwork",
+     "w": 2.0,
+     "weight": 0.4
+    },
+    {
+     "sprite": "car_red",
+     "w": 4.8,
+     "weight": 0.5
+    },
+    {
+     "sprite": "magpie",
+     "w": 0.6,
+     "weight": 0.4
+    }
+   ],
+   "landmarks": [
+    {
+     "sprite": "gate_red",
+     "x": 651,
+     "w": 5.14,
+     "lift": 0.0
+    },
+    {
+     "sprite": "saddledome",
+     "x": 760,
+     "w": 66.0,
+     "lift": 0.0
+    }
+   ]
+  },
+  {
+   "name": "THE SUBURBS",
+   "landed": "in Sage Ridge Park Hills, phase 47",
+   "street": "Sage Ridge Park Hills",
+   "from": 850,
+   "to": 1100,
+   "ground": "street",
+   "gap": [
+    2.5,
+    4.0
+   ],
+   "facades": [
+    {
+     "sprite": "house_a",
+     "w": 13.33,
+     "smoke": [
+      0.838,
+      0.073
+     ]
+    },
+    {
+     "sprite": "house_b",
+     "w": 13.33,
+     "smoke": [
+      0.162,
+      0.073
+     ]
+    },
+    {
+     "sprite": "house_c",
+     "w": 13.33,
+     "smoke": [
+      0.838,
+      0.073
+     ]
+    }
+   ],
+   "props": [
+    {
+     "sprite": "inflatable_santa",
+     "w": 2.4,
+     "weight": 1.0
+    },
+    {
+     "sprite": "ped_shorts",
+     "w": 1.56,
+     "weight": 1.0
+    },
+    {
+     "sprite": "ped_hockey",
+     "w": 1.19,
+     "weight": 0.8
+    },
+    {
+     "sprite": "ped_walker",
+     "w": 3.41,
+     "weight": 0.5
+    },
+    {
+     "sprite": "deer",
+     "w": 2.1,
+     "weight": 0.6
+    },
+    {
+     "sprite": "pickup",
+     "w": 5.6,
+     "weight": 0.6
+    },
+    {
+     "sprite": "car_blue",
+     "w": 4.8,
+     "weight": 0.5
+    },
+    {
+     "sprite": "jackrabbit",
+     "w": 0.7,
+     "weight": 0.5
+    }
+   ],
+   "landmarks": [
+    {
+     "sprite": "comm_sign",
+     "x": 856,
+     "w": 7.0,
+     "lift": 0.0
+    },
+    {
+     "sprite": "drive_in",
+     "x": 1010,
+     "w": 15.0,
+     "lift": 0.0
+    },
+    {
+     "sprite": "blue_ring",
+     "x": 1070,
+     "w": 16.0,
+     "lift": 0.0
+    }
+   ]
+  },
+  {
+   "name": "THE PRAIRIE",
+   "landed": "out on the prairie, Hwy 1",
+   "street": "Hwy 1 West",
+   "from": 1100,
+   "to": 100000,
+   "ground": "snow",
+   "facades": [],
+   "props": [
+    {
+     "sprite": "cow",
+     "w": 2.6,
+     "weight": 1.0
+    },
+    {
+     "sprite": "magpie",
+     "w": 0.6,
+     "weight": 0.4
+    },
+    {
+     "sprite": "jackrabbit",
+     "w": 0.7,
+     "weight": 0.4
+    }
+   ],
+   "landmarks": [
+    {
+     "sprite": "hwy_sign",
+     "x": 1102,
+     "w": 5.0,
+     "lift": 0.0
+    },
+    {
+     "sprite": "grain_elevator",
+     "x": 1160,
+     "w": 8.0,
+     "lift": 0.0
+    },
+    {
+     "sprite": "grain_elevator",
+     "x": 1700,
+     "w": 8.0,
+     "lift": 0.0
+    }
+   ],
+   "pumpjacks": {
+    "base": "pumpjack_base",
+    "beam": "pumpjack_beam",
+    "w": 11.0,
+    "every": 140,
+    "from": 1230
+   }
+  }
+ ]
+}

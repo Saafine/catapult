@@ -14,7 +14,8 @@ crates/game   hamsters       macroquad runtime: window, input, drawing, particle
 crates/game/assets/sprites   rendered PNG sprites (embedded into the binary)
 crates/game/assets/*.ttf     Fredoka and Lilita One, both under the OFL
 assets/svg    generated SVG sources for every sprite
-tools/        gen_svg.py writes the SVGs; render_sprites.js rasterizes them
+tools/        gen_svg.py writes the SVGs; render_sprites.js rasterizes them;
+              gen_city.py draws Calgary's streets and writes packs/<pack>/city.json
 web/          index.html + macroquad's JS glue; the wasm is copied here on build
 ```
 
@@ -72,6 +73,7 @@ cargo test -p hamsters-core
 | space / click   | lock the push, then lock the jump angle at the lip       |
 | space / click   | in the air: wiggle the paws for lift (costs stamina)     |
 | R               | new run (keeps best distance)                            |
+| K               | before launch: change cape (Santa's orders unlock more)  |
 
 Wiggling refills slowly in the air and jumps up when you grab a present. A
 wiggle never pushes you above a modest climb rate, so mashing keeps you
@@ -88,8 +90,8 @@ airborne rather than launching you into orbit.
 ## Screenshots without a GPU
 
 `cargo build ... --features devkeys` adds a `P` key that does a perfect
-launch, `C` for a dive that crashes, `F` for a fireworks display and `T` for
-slow motion. A Playwright script that drives the page through a flight lives in
+launch, `C` for a dive that crashes, `F` for a fireworks display, `T` for
+slow motion, `G` to glide into the next city district and `J` to skip 55 m. A Playwright script that drives the page through a flight lives in
 the session scratchpad; the feature is never part of the normal build.
 
 ## Where to add things

@@ -3,22 +3,114 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-  <title>Hamsters</title>
+  <title>Santa's Flight School</title>
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; background: #1E2440; overflow: hidden; }
-    canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+    @font-face { font-family: 'Lilita'; src: url('fonts/LilitaOne.ttf') format('truetype'); font-display: swap; }
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+      /* The painted daytime sky, so the page never flashes black. */
+      background: linear-gradient(180deg, #3d7fd0 0%, #6fb1ec 45%, #bfe3fb 78%, #eef7fd 100%); }
+    canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; outline: none; touch-action: none; }
+    #boot { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2.2vh; overflow: hidden; z-index: 2; transition: opacity .6s ease, transform .6s ease;
+      background:
+        radial-gradient(circle at 78% 22%, rgba(255,246,200,.95) 0 5.5vh, rgba(255,236,160,.35) 6vh 11vh, transparent 18vh),
+        linear-gradient(180deg, #3d7fd0 0%, #6fb1ec 45%, #bfe3fb 78%, #eef7fd 100%); }
+    #boot.gone { opacity: 0; transform: scale(1.04); pointer-events: none; }
+    #boot .hills { position: absolute; left: -5%; right: -5%; bottom: -6vh; height: 30vh; border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+      background: linear-gradient(180deg, #ffffff, #dcebf8 60%, #b9d2ea); box-shadow: 0 -2px 0 #8fb0d0; }
+    #boot .hills.back { bottom: 2vh; left: -30%; right: 30%; height: 26vh; background: linear-gradient(180deg, #e9f3fc, #c3d9ee); opacity: .9; }
+    #boot img { width: min(78vw, 640px); height: auto; position: relative; z-index: 1;
+      animation: bob 2.4s ease-in-out infinite; opacity: 0; transition: opacity .4s; will-change: transform; }
+    #boot img.on { opacity: 1; }
+    #boot .card { position: relative; z-index: 1; width: min(62vw, 420px); padding: 14px 20px 16px; border-radius: 18px;
+      background: linear-gradient(180deg, #fffdf6, #fbf0d8 55%, #efd8ac); border: 3px solid #a8733f;
+      box-shadow: 0 8px 14px rgba(29,42,74,.3), inset 0 0 0 5px #fffdf6, inset 0 0 0 7px #d65a5a; text-align: center; }
+    #boot .msg { font: 22px 'Lilita', 'Trebuchet MS', sans-serif; color: #1e2440; letter-spacing: .5px; margin-bottom: 10px; }
+    #boot .track { height: 18px; border-radius: 10px; background: #6b5550; border: 3px solid #4a2c22; overflow: hidden; }
+    #boot .fill { height: 100%; width: 0%; border-radius: 8px; transition: width .25s ease;
+      background: repeating-linear-gradient(-45deg, #e2373f 0 12px, #fff7e6 12px 24px);
+      box-shadow: inset 0 3px 0 rgba(255,255,255,.45), inset 0 -4px 0 rgba(0,0,0,.15); animation: candy 1s linear infinite; }
+    #boot .hint { font: 15px 'Lilita', 'Trebuchet MS', sans-serif; color: #5a6178; margin-top: 8px; }
+    .flake { position: absolute; top: -4vh; will-change: transform; color: #fff; text-shadow: 0 0 4px rgba(120,160,210,.8); animation: fall linear infinite; z-index: 0; }
+    @keyframes bob { 0%, 100% { transform: translateY(0) rotate(-.6deg); } 50% { transform: translateY(-8px) rotate(.6deg); } }
+    @keyframes candy { to { background-position: 34px 0; } }
+    @keyframes fall { to { transform: translateY(112vh) translateX(4vw) rotate(240deg); } }
   </style>
 </head>
 <body>
-  <canvas id="glcanvas" tabindex="1"></canvas>
+  <div id="boot">
+    <div class="hills back"></div><div class="hills"></div>
+    <img id="boot-logo" alt="Santa's Flight School">
+    <div class="card">
+      <div class="msg" id="boot-msg">Waxing the sleds…</div>
+      <div class="track"><div class="fill" id="boot-fill"></div></div>
+      <div class="hint">press SPACE to lock the push · press again at the lip</div>
+    </div>
+  </div>
+  <canvas id="glcanvas" tabindex="1" style="visibility:hidden"></canvas>
+  <script>
+  // Loading screen: counts the files the game fetches and fades out once
+  // they stop arriving.
+  (function () {
+    // Automated captures (navigator.webdriver) skip the card so their timing
+    // matches the bare page; ?boot forces it for a screenshot of it.
+    if (navigator.webdriver && !/[?&]boot/.test(location.search)) {
+      document.getElementById('boot').remove();
+      document.getElementById('glcanvas').style.visibility = 'visible';
+      return;
+    }
+    var boot = document.getElementById('boot'), fill = document.getElementById('boot-fill'), msg = document.getElementById('boot-msg');
+    for (var i = 0; i < 14; i++) {
+      var f = document.createElement('div'); f.className = 'flake'; f.textContent = i % 3 ? '•' : '❄';
+      f.style.left = (Math.random() * 100) + 'vw'; f.style.fontSize = (6 + Math.random() * 16) + 'px';
+      f.style.opacity = .5 + Math.random() * .5; f.style.animationDuration = (5 + Math.random() * 7) + 's';
+      f.style.animationDelay = (-Math.random() * 10) + 's'; boot.appendChild(f);
+    }
+    var lines = ['Waxing the sleds…', 'Warming up the ears…', 'Wrapping presents…', 'Checking the chinook…', 'Polishing the ski jump…'];
+    var started = 0, finished = 0, last = Date.now(), seen = 0, done = false;
+    var send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function () {
+      started++; last = Date.now();
+      this.addEventListener('loadend', function () { finished++; seen++; last = Date.now(); });
+      return send.apply(this, arguments);
+    };
+    function tick() {
+      if (done) return;
+      // The pack has a couple of hundred files; ease towards full as they come.
+      var k = 1 - Math.exp(-seen / 90);
+      fill.style.width = (6 + 92 * k).toFixed(1) + '%';
+      msg.textContent = lines[Math.floor(Date.now() / 1400) % lines.length];
+      if (seen > 20 && started === finished && Date.now() - last > 700) {
+        done = true; fill.style.width = '100%';
+        setTimeout(reveal, 250);
+        setTimeout(function () { boot.remove(); }, 1000);
+        return;
+      }
+      setTimeout(tick, 120);
+    }
+    setTimeout(tick, 120);
+    // The canvas stays hidden under the card while loading (cheaper to
+    // composite), then shows and takes the keyboard.
+    function reveal() {
+      var c = document.getElementById('glcanvas');
+      c.style.visibility = 'visible'; c.focus(); boot.classList.add('gone');
+    }
+    // Safety: never keep the game hidden for long.
+    setTimeout(function () { if (!done) { done = true; reveal(); setTimeout(function () { boot.remove(); }, 800); } }, 25000);
+  })();
+  </script>
   <script src="mq_js_bundle.js"></script>
   <script src="sapp_jsutils.js"></script>
   <script src="quad_storage.js"></script>
   <script src="quad_snd.js"></script>
   <script>load("hamsters.wasm?v=" + Date.now());</script>
 <script>
-  // Tab title follows the active asset pack.
-  fetch('packs/active.json').then(r => r.json()).then(a => fetch(`packs/${a.pack}/pack.json`)).then(r => r.json()).then(p => { document.title = p.title; }).catch(() => {});
+  // Tab title and the loading-screen logo follow the active asset pack.
+  fetch('packs/active.json').then(r => r.json()).then(a => {
+    var img = document.getElementById('boot-logo');
+    if (img) { img.onload = function () { img.classList.add('on'); }; img.src = `packs/${a.pack}/sprites/ui_logo.png`; }
+    return fetch(`packs/${a.pack}/pack.json`);
+  }).then(r => r.json()).then(p => { document.title = p.title; }).catch(() => {});
 </script>
 </body>
 </html>

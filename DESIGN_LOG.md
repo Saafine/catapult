@@ -155,3 +155,114 @@ Direct requests from playing the round-2 build, not a designer round:
 - **Mountains no longer jitter.** Scenery tiles are phased at the screen
   centre in tile units, so a zoom change scales the layer in place instead
   of sliding it sideways.
+
+### Calgary's streets (2026-10-08)
+
+The user asked to fly over real Calgary streets, recreated in a funny way so
+people who live there feel at home. Drawn from ~25 street photos on
+Wikimedia Commons (Inglewood's 9 Av SE, Stephen Avenue, the CTrain on 7 Av,
+the +15s, Wonderland, Old City Hall, the Peace Bridge, Kensington, 17 Av SW,
+the Saddledome, the Bow, the Calgary Tower).
+
+- **Districts along the course** (`tools/gen_city.py` -> `packs/<pack>/city.json`,
+  `crates/game/src/city.rs`): Inglewood from 22 m, Stephen Avenue 190 m, the
+  Bow 400 m, Kensington 480 m, the Red Mile 650 m, the suburbs 850 m, the
+  prairie from 1100 m. Facades stand on the street behind the snowbank;
+  the ground turns into asphalt with a yellow centre line, and into the
+  frozen Bow with a skating oval under the Peace Bridge.
+- **Jokes for locals**: the Plaza marquee "IT'S A WONDERFUL CHINOOK", a +12 °C
+  time-and-temperature sign on Dec 24, ROAD WORK "SEASON: ALL YEAR", a
+  rooftop "PATIO OPEN!" in December, a donair shop, GO FLAMES GO on the Red
+  Mile, the Saddledome in a Santa hat, cars plugged in by block heaters, a
+  guy in shorts shovelling, identical suburban houses with only the door
+  colour changed behind a "SAGE RIDGE PARK HILLS · PHASE 47 NOW SELLING"
+  sign, a mule deer, the blue ring with its streetlamp, a 1964 drive-in,
+  magpies everywhere, a white jackrabbit, a CTrain to SOMERSET with toques
+  and white hats in the windows, ALBERTA POOL grain elevators, pumpjacks
+  nodding in Santa hats, cows in toques.
+- **Skyline**: one wide far layer (Calgary Tower with its torch lit, Bankers
+  Hall, the Bow, Brookfield Place, Telus Sky, Suncor, Eighth Avenue Place,
+  two cranes), centred over downtown, visible from the launch and towering
+  over the Rockies on a climb.
+- **Welcome banners** name each district as the dog flies in; the results
+  card says where it came down ("landed on the Red Mile, 17 Av SW").
+- People on the sidewalk hop and turn to the dog as it passes; critters hop.
+- `render_sprites.js` honours `data-scale` (big facades render at 1x/1.5x)
+  and `ONLY=<regex>`. Dev keys: `G` next district, `J` skip 55 m.
+
+### Replay value: course, pacing, orders (2026-10-08, gameplay team)
+
+Play-analysed headlessly (`crates/core/examples/playtest.rs`, scripted
+players over hundreds of seeds; numbers in the team report). Found: mashing
+beat careful play (endless stamina from the 25-wiggle refill plus presents,
+and wiggles that kept adding speed), the launch had no effect on distance,
+and long flights were 50-80% dead air with gaps up to 20 s.
+
+- **Hand-authored patterns** (`crates/core/src/course.rs`): beats of present
+  arcs, ladders up to a rocket, storm gates with presents threaded through,
+  storm bait (close-shave line), rocket fans, Chinook lifts, trampoline hops,
+  high caches, cold snaps, reindeer relays, constellations in space; weighted
+  by Calgary district (fireworks on the Red Mile, Arctic gusts over the Bow,
+  Chinooks on the prairie, trampolines in the suburbs). Laid relative to the
+  line the dog is flying, just past the right edge of the frame, spaced in
+  flight time (a beat every 1-2 s). Loose presents fill the gaps; storms,
+  presents and the odd sleigh fill the sky above and below the line.
+- **The launch relay**: the opening is simulated on a sweet-spot push with a
+  perfect jump: presents, a rocket at the top of the arc, presents along the
+  line the rocket really throws, a reindeer, more presents. Course boosters
+  start where the relay ends. A clean launch rides it into town; a weak one
+  passes under it.
+- **Ears**: the forward kick fades out at a stall and at top speed (wiggles
+  lift, boosters push); lift at a stall 0.25 (was 0.6); ears need air
+  (weaker above 200 m, so space ends as a meteor); the 25-wiggle streak tops
+  up 0.4 instead of refilling. Rockets have a top speed (150 m/s). Presents
+  nudge 1.2/2.2 m/s and give 0.12 stamina (were 3/3.5 and 0.2).
+- **Landing**: a stomp now survives an ordinary descent (crash x1.6, was
+  x1.4) but needs 9 m/s of pace to spring, so landing well is a skill and
+  crawling along the snow is not.
+- **Boosters thin on the flight clock** (half after 25 s), not by distance,
+  so every flight ends but a good start is not erased.
+- **Close shaves**: flying past a storm cloud within 7.5 m pays stamina.
+- **Santa's orders** (`missions.rs`, `crates/game/src/orders.rs`): three
+  per-flight orders at a time from a 30-order book, then an endless one
+  ("Catch 10 presents", "Reach the Bow", "Fly past 3 storm clouds", "Stomp a
+  landing", "300 m without a storm hit"...). Completing one shows a DONE
+  ribbon mid-flight; orders bank at the next launch; ranks (CADET to SANTA'S
+  ACE) unlock capes, K changes cape before a launch.
+- Pilots rebalanced: Pixie drag 0.0115 and ears 1.5, Nanook drag 0.0085.
+
+
+### The ten-team studio pass (2026-10-08)
+
+"The game looks cheap": ten teams worked in parallel, one domain each, in
+separate worktrees merged 3-way.
+
+- **Characters**: every dog redrawn; Buddy beagle, Nanook husky, Pixie
+  Yorkie with seven distinct faces; Santa, elves, reindeer, sled, cloth cape
+  (`tools/char_dog.py`, `tools/char_people.py`).
+- **Environment**: painted Rockies, forested foothills layer, sculpted snow,
+  sun halo and rays, horizon haze, far range over a cloud sea at altitude,
+  bolted ramp with floodlight masts (`tools/terrain.py`). The moon waits
+  until the sun has gone (space 0.7+), never both in one sky.
+- **City**: two-depth painted downtown skyline, lit interiors, chimney
+  smoke, traffic, five new Calgarians, district gate signs
+  (`tools/city_skyline.py`).
+- **Props**: 3/4-view presents (rare gold one), painted rocket with flame,
+  angry thunderheads, all animated in `props.rs`.
+- **VFX**: rewritten particles with colour ramps; five firework shell types
+  on records and milestones; layered crash; four-depth snow
+  (`vfx.rs`, `fxtex.rs`).
+- **Rendering**: sprites load with bled alpha and mipmaps (no dark fringes),
+  up to 2x supersampling, bloom, sun shafts, grade, vignette, WebGL2 with
+  WebGL1 fallback; HUD drawn after post (`post.rs`, dev key O cycles it).
+- **UI**: game logo, painted UI kit (`tools/gen_ui.py`, `ui.rs`), big picker
+  cards with stat bars, banners that pick a slot clear of the dog, a new
+  results card, painted loading page.
+- **Animation**: spring rig, verlet cape, Santa and roof elves react,
+  aim-ahead camera, PERFECT slow-motion beat (`anim.rs`).
+- **Audio**: layered synthesis with variants, speed-tracked sled hiss, music
+  ducking, a master limiter in `web/quad_snd.js`.
+- **Gameplay**: see the section above (authored course, orders, capes).
+
+Headless SwiftShader captures run the post-processed build at ~6 fps, which
+throws the real-time camera off in stills; press O first for framing shots.

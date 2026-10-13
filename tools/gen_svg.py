@@ -225,91 +225,12 @@ write("moon", 256, 256, f'''
 <g opacity="0.35" fill="#b9b39a"><circle cx="104" cy="112" r="14"/><circle cx="146" cy="140" r="10"/><circle cx="120" cy="156" r="7"/><circle cx="150" cy="104" r="5"/></g>
 ''', rg("moon", [(0, "#fffdf2"), (0.7, "#f3edd2"), (1, "#d9d2b0")], cx=0.4, cy=0.35, r=0.75) + glow("mglow", "#fff6c8", 0.5))
 
-def cloud(name, puffs, w, h):
-    shapes = "".join(f'<circle cx="{x}" cy="{y}" r="{r}" fill="url(#cl)"/>' for x, y, r in puffs)
-    shade = "".join(f'<circle cx="{x}" cy="{y + 10}" r="{r}" fill="#a9b8dc" opacity="0.45"/>' for x, y, r in puffs)
-    hi = "".join(f'<circle cx="{x - r*0.3}" cy="{y - r*0.35}" r="{r*0.5}" fill="#ffffff" opacity="0.55"/>' for x, y, r in puffs)
-    write(name, w, h, f'<g filter="url(#b1)"><g>{shade}</g><rect x="{w*0.12}" y="{h*0.55}" width="{w*0.76}" height="{h*0.25}" rx="{h*0.12}" fill="#e8eefb"/><g>{shapes}</g><g>{hi}</g></g>',
-          rg("cl", [(0, "#ffffff"), (0.7, "#f1f5ff"), (1, "#cfdaf2")], cx=0.4, cy=0.3, r=0.8) + blur("b1", 1.2))
-cloud("cloud_a", [(70, 90, 44), (130, 66, 60), (200, 80, 50), (250, 100, 36)], 320, 160)
-cloud("cloud_b", [(60, 80, 36), (110, 60, 46), (160, 74, 40), (200, 92, 30)], 260, 140)
-cloud("cloud_c", [(80, 100, 50), (150, 60, 70), (230, 78, 56), (300, 104, 40), (340, 116, 26)], 400, 180)
-
 write("snowflake", 64, 64, '<circle cx="32" cy="32" r="30" fill="url(#p)"/>', rg("p", [(0, "#ffffff", 1), (0.5, "#ffffff", 0.6), (1, "#ffffff", 0)], cx=0.5, cy=0.5, r=0.5))
 write("star", 64, 64, '<path d="M32,2 L38,26 L62,32 L38,38 L32,62 L26,38 L2,32 L26,26 Z" fill="#fff6c0"/><circle cx="32" cy="32" r="7" fill="#ffffff"/>')
 
 # ---------------------------------------------------------------------------
 # Parallax layers
 # ---------------------------------------------------------------------------
-
-def smooth_path(pts, W, H):
-    d = f"M{pts[0][0]},{pts[0][1]:.1f} "
-    for k in range(1, len(pts) - 1):
-        x0, y0 = pts[k]; x1, y1 = pts[k + 1]
-        d += f"Q{x0},{y0:.1f} {(x0 + x1) / 2:.1f},{(y0 + y1) / 2:.1f} "
-    d += f"L{pts[-1][0]},{pts[-1][1]:.1f} L{W},{H} L0,{H} Z"
-    return d
-
-def periodic(x, W, terms):
-    return sum(a * math.sin(2 * math.pi * k * x / W + p) for a, k, p in terms)
-
-def mountain_tile(name, W, H, seed, n_peaks, top, mid, bottom, shadow, haze, sd):
-    r = random.Random(seed)
-    peaks = [((i + r.uniform(0.15, 0.85)) * W / n_peaks, r.uniform(0.45, 0.95) * W / n_peaks, r.uniform(0.5, 1.0) * H * 0.82, r.uniform(-0.35, 0.35), r.uniform(1.6, 2.6)) for i in range(n_peaks)]
-    def height(x):
-        best = 0.0
-        for cx, w, h, skew, sharp in peaks:
-            for off in (-W, 0, W):
-                dx = x - (cx + off)
-                side_w = w * (1 + skew) if dx > 0 else w * (1 - skew)
-                t = abs(dx) / side_w
-                if t < 1:
-                    best = max(best, h * (1 - t) ** sharp + 5 * math.sin(x * 0.05 + cx))
-        return best + H * 0.10 + 10 * math.sin(2 * math.pi * 2 * x / W)
-    step = 8
-    raw = [height(x) for x in range(0, W + 1, step)]
-    sm = [(raw[k - 1] + 2 * raw[k] + raw[k + 1]) / 4 if 0 < k < len(raw) - 1 else raw[k] for k in range(len(raw))]
-    pts = [(k * step, H - sm[k]) for k in range(len(sm))]
-    d = smooth_path(pts, W, H)
-    dsh = smooth_path([(x + 40, y + 16) for x, y in pts], W + 40, H)
-    # Flat cartoon: one fill, a darker shade wedge, snow caps, and a thick
-    # ink line along the ridge.
-    body = f'<clipPath id="sil"><path d="{d}"/></clipPath>'
-    body += f'<path d="{d}" fill="{mid}"/>'
-    body += f'<path d="{dsh}" fill="{shadow}" opacity="0.5" clip-path="url(#sil)"/>'
-    body += f'<path d="{d}" fill="none" stroke="{top}" stroke-width="34" clip-path="url(#sil)"/>'
-    body += f'<path d="{d}" fill="none" stroke="#2b3a5a" stroke-width="9" stroke-linejoin="round"/>'
-    body += f'<rect x="0" y="{H * 0.55:.0f}" width="{W}" height="{H * 0.45:.0f}" fill="url(#haze)"/>'
-    write(name, W, H, body, lg("haze", [(0, haze, 0), (1, haze, 0.9)]))
-
-mountain_tile("mountains_far", 4096, 512, 3, 9, "#ffffff", "#a9c6ee", "#8d9bd0", "#6f8fc6", "#bfe0f7", 2.2)
-mountain_tile("mountains_near", 4096, 512, 11, 8, "#ffffff", "#8fb2e6", "#7d8cc4", "#5a7fc0", "#bfe0f7", 1.0)
-
-def snowhill_tile(name, W, H, terms, seed, tree_every, sd):
-    r = random.Random(seed)
-    step = 6
-    pts = [(x, H * 0.62 - periodic(x, W, terms) * H * 0.42) for x in range(0, W + 1, step)]
-    d = smooth_path(pts, W, H)
-    body = f'<clipPath id="hc"><path d="{d}"/></clipPath><g><path d="{d}" fill="#eef4ff"/>'
-    for i in range(30):
-        x = r.uniform(0, W); y = r.uniform(H * 0.3, H); rx = r.uniform(60, 180); ry = rx * 0.28
-        body += f'<ellipse cx="{x:.0f}" cy="{y:.0f}" rx="{rx:.0f}" ry="{ry:.0f}" fill="#c9daf5" opacity="0.6" clip-path="url(#hc)"/>'
-    def y_at(x):
-        k = int(x / step) % len(pts)
-        return pts[k][1]
-    for i in range(int(W / tree_every)):
-        x = i * tree_every + r.uniform(-tree_every * 0.4, tree_every * 0.4)
-        h = r.uniform(70, 140)
-        y = y_at(x % W) + 6
-        for off in (0, W, -W):
-            xx = x + off
-            body += f'<path d="M{xx:.0f},{y - h:.0f} L{xx + h*0.36:.0f},{y:.0f} L{xx - h*0.36:.0f},{y:.0f} Z" fill="#2fa353" stroke="#2b3a5a" stroke-width="5" stroke-linejoin="round"/>'
-            body += f'<path d="M{xx:.0f},{y - h:.0f} L{xx + h*0.18:.0f},{y - h*0.55:.0f} L{xx - h*0.18:.0f},{y - h*0.55:.0f} Z" fill="#ffffff" opacity="0.9"/>'
-    body += f'<path d="{d}" fill="none" stroke="#2b3a5a" stroke-width="9" stroke-linejoin="round"/></g>'
-    write(name, W, H, body)
-
-snowhill_tile("hills_far", 4096, 384, [(0.5, 3, 0.8), (0.3, 7, 2.4), (0.12, 15, 0.2), (0.08, 29, 1.1)], 5, 150, 1.0)
-snowhill_tile("hills_near", 4096, 320, [(0.55, 4, 2.9), (0.25, 9, 1.1), (0.12, 19, 0.6), (0.06, 41, 2.0)], 9, 150, 0.6)
 
 def village_tile(name, W, H, seed):
     r = random.Random(seed)
@@ -364,7 +285,8 @@ def village_tile(name, W, H, seed):
     body += '</g>'
     write(name, W, H, body, lg("pineg", [(0, "#3f8a63"), (1, "#1c4d3a")]) + glow("wglow", "#ffcc66", 0.5) + lg("glass", [(0, "#a9c4ee"), (1, "#4f6fa8")])
           + lg("house0", [(0, "#b3584a"), (1, "#7a3a30")]) + lg("house1", [(0, "#5a7fa8"), (1, "#3a5a80")]) + blur("bl", 0.5))
-village_tile("treeline", 8192, 340, 21)
+import terrain  # the painted treeline and meadow live in terrain.py
+terrain.treeline()
 
 def snowfield_tile(name, W, H, seed):
     # Flat snow with a few paler drifts, no blur.
@@ -377,20 +299,7 @@ def snowfield_tile(name, W, H, seed):
                 body += f'<ellipse cx="{x + dx:.0f}" cy="{y + dy:.0f}" rx="{rx:.0f}" ry="{ry:.0f}" fill="#dde6f7"/>'
                 body += f'<ellipse cx="{x + dx:.0f}" cy="{y + dy - 6:.0f}" rx="{rx * 0.8:.0f}" ry="{ry * 0.6:.0f}" fill="#ffffff"/>'
     write(name, W, H, body)
-snowfield_tile("meadow", 512, 256, 33)
-
-W, H = 512, 256
-rnd = random.Random(7)
-lumps = "".join(f'<ellipse cx="{i + rnd.uniform(-8, 8) + dx:.0f}" cy="50" rx="{rnd.uniform(24, 44):.0f}" ry="14" fill="#ffffff" stroke="#2b3a5a" stroke-width="5"/>' for i in range(0, W, 40) for dx in (-W, 0, W))
-write("ground", W, H, f'''
-<rect x="0" y="60" width="{W}" height="{H - 60}" fill="#7f8fc4"/>
-<rect x="0" y="110" width="{W}" height="{H - 110}" fill="#5f6da6"/>
-<rect x="0" y="40" width="{W}" height="34" fill="#ffffff"/>
-{lumps}
-<rect x="0" y="52" width="{W}" height="22" fill="#ffffff"/>
-<rect x="0" y="72" width="{W}" height="6" fill="#2b3a5a"/>
-<rect x="0" y="78" width="{W}" height="10" fill="#a9b6dd"/>
-''')
+terrain.meadow()
 
 # ---------------------------------------------------------------------------
 # Ground props

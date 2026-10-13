@@ -10,6 +10,7 @@ pack=$(python3 -c "import json;print(json.load(open('packs/active.json'))['pack'
 mkdir -p web/packs/"$pack"
 cp packs/active.json web/packs/active.json
 cp packs/"$pack"/pack.json web/packs/"$pack"/pack.json
+if [ -f packs/"$pack"/city.json ]; then cp packs/"$pack"/city.json web/packs/"$pack"/city.json; fi
 rsync -a --delete packs/"$pack"/sprites/ web/packs/"$pack"/sprites/
 if [ -d packs/"$pack"/sounds ]; then rsync -a --delete packs/"$pack"/sounds/ web/packs/"$pack"/sounds/; fi
 ls -la web/hamsters.wasm
